@@ -1,0 +1,6 @@
+gunicorn>=22.0, <23.0
+uvicorn>=0.23, <0.24
+fastapi>=0.111, <0.112
+python-dotenv==1.0.1
+redis==5.2.1
+azure-cosmos==4.8.0
