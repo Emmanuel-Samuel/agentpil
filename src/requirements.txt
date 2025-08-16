@@ -4,3 +4,8 @@ fastapi>=0.111, <0.112
 python-dotenv==1.0.1
 redis==5.2.1
 azure-cosmos==4.8.0
+azure-ai-projects
+azure-identity
+azure-ai-agents
+azure-identity
+azure-mgmt-resource
