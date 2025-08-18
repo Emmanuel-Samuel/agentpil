@@ -160,16 +160,24 @@ class AIAgentService:
                 logger.info(f"Creating run for agent {agent_id} in thread {thread_id}")
                 logger.info(f"Current thread has messages: {len(await asyncio.to_thread(lambda: list(self.agents_client.messages.list(thread_id=thread_id)))}")
                 
-                # Use create_and_process since enable_auto_function_calls handles tool execution automatically
+                # Create the run and then process it manually
                 run = await asyncio.to_thread(
-                    self.agents_client.runs.create_and_process,
+                    self.agents_client.runs.create,
                     thread_id=thread_id,
                     agent_id=agent_id
                 )
-                logger.debug(f"Created and processed run {run.id} for agent {agent_id}")
-                logger.info(f"Run {run.id} completed with status: {getattr(run, 'status', None)}")
+                logger.debug(f"Created run {run.id} for agent {agent_id}")
+                logger.info(f"Starting run processing for run {run.id}")
+            except Exception as run_create_error:
+                logger.error(f"Failed to create run: {run_create_error}")
+                return "I'm sorry, I encountered an error while starting the conversation. Please try again."
                 
-                # The run should be completed now, get the assistant message
+            run = await self._process_run_until_complete(thread_id=thread_id, run_id=run.id)
+            logger.debug(f"Processed run {run.id} to terminal status: {getattr(run, 'status', None)}")
+            
+            # Check run status and fetch assistant message
+            if run.status == "completed":
+                # Ensure we have a concrete list for safe reverse iteration
                 messages = await asyncio.to_thread(lambda: list(self.agents_client.messages.list(thread_id=thread_id)))
                 for message in reversed(messages):
                     if getattr(message, "role", None) == "assistant":
@@ -189,10 +197,13 @@ class AIAgentService:
                 
                 logger.warning(f"No assistant message found in completed run {run.id}")
                 return "I'm sorry, I couldn't process your request at this time."
-                
-            except Exception as run_create_error:
-                logger.error(f"Failed to create/process run: {run_create_error}")
-                return "I'm sorry, I encountered an error while starting the conversation. Please try again."
+            elif run.status == "failed":
+                error_msg = getattr(run, 'last_error', 'Unknown error')
+                logger.error(f"Agent run {run.id} failed: {error_msg}")
+                return "I'm sorry, there was an error processing your request. Please try again."
+            else:
+                logger.warning(f"Agent run {run.id} ended with status: {run.status}")
+                return "I'm sorry, your request is taking longer than expected. Please try again."
         except Exception as e:
             logger.error(f"Error getting agent response: {str(e)}", exc_info=True)
             return "I'm sorry, I encountered an error while processing your request. Please try again."
