@@ -356,6 +356,12 @@ class AIAgentService:
                 # Log more details about the run
                 logger.info(f"Run {run_id} details: {getattr(run, 'required_action', 'None')}")
                 logger.info(f"Run {run_id} last_error: {getattr(run, 'last_error', 'None')}")
+                logger.info(f"Run {run_id} tool_calls: {getattr(run, 'tool_calls', 'None')}")
+                
+                # Check if there are any tool-related fields we're missing
+                run_attrs = [attr for attr in dir(run) if not attr.startswith('_') and 'tool' in attr.lower()]
+                if run_attrs:
+                    logger.info(f"Run {run_id} has tool-related attributes: {run_attrs}")
                 
                 if status == "requires_action":
                     logger.info(f"Run {run_id} requires action, processing tool calls...")
@@ -364,9 +370,24 @@ class AIAgentService:
                         logger.warning(f"Run {run_id} requires_action but no required_action found")
                         # Defensive: break to avoid infinite loop
                         break
-                    submit = getattr(required, "submit_tool_outputs", None)
-                    tool_calls = getattr(submit, "tool_calls", []) if submit else []
+                    
+                    # Extract tool calls from required_action
+                    tool_calls = []
+                    if hasattr(required, "submit_tool_outputs"):
+                        submit = getattr(required, "submit_tool_outputs")
+                        if hasattr(submit, "tool_calls"):
+                            tool_calls = getattr(submit, "tool_calls", [])
+                    elif hasattr(required, "tool_calls"):
+                        tool_calls = getattr(required, "tool_calls", [])
+                    
                     logger.info(f"Run {run_id} has {len(tool_calls)} tool calls to process")
+                    
+                    if not tool_calls:
+                        logger.warning(f"Run {run_id} requires_action but no tool_calls found")
+                        # Try to get tool calls from the run object directly
+                        tool_calls = getattr(run, "tool_calls", [])
+                        logger.info(f"Found {len(tool_calls)} tool calls from run object")
+                    
                     tool_outputs = []
                     for tc in tool_calls:
                         try:
@@ -382,6 +403,8 @@ class AIAgentService:
                                 raw_args = getattr(tc, "arguments", None)
 
                             logger.info(f"Processing tool call: {tool_name} with args: {raw_args}")
+                            
+                            # Parse arguments
                             if raw_args and isinstance(raw_args, str):
                                 try:
                                     tool_args = json.loads(raw_args)
@@ -392,6 +415,7 @@ class AIAgentService:
                             else:
                                 tool_args = {}
 
+                            # Execute the tool
                             output_str = ""
                             if tool_name in self.callable_tools:
                                 tool_fn = self.callable_tools[tool_name]
@@ -404,26 +428,39 @@ class AIAgentService:
                                 logger.warning(f"Unknown tool: {tool_name}")
                                 output_str = json.dumps({"status": "error", "message": f"Unknown tool: {tool_name}"})
 
+                            # Get tool call ID
+                            tool_call_id = getattr(tc, "id", None) or getattr(tc, "tool_call_id", None)
+                            if not tool_call_id:
+                                logger.warning(f"No tool_call_id found for tool {tool_name}")
+                                continue
+
                             tool_outputs.append({
-                                "tool_call_id": getattr(tc, "id", None) or getattr(tc, "tool_call_id", None),
+                                "tool_call_id": tool_call_id,
                                 "output": output_str or ""
                             })
                         except Exception as tool_exc:
                             logger.error(f"Error executing tool call: {tool_exc}")
+                    
                     if tool_outputs:
                         # Submit outputs and continue
                         logger.info(f"Submitting {len(tool_outputs)} tool outputs for run {run_id}")
-                        await asyncio.to_thread(
-                            self.agents_client.runs.submit_tool_outputs,
-                            thread_id=thread_id,
-                            run_id=run_id,
-                            tool_outputs=tool_outputs
-                        )
-                        # Loop to re-poll status
-                        await asyncio.sleep(0.2)
-                        continue
-                    # If no tool outputs were produced, avoid tight loop
-                    await asyncio.sleep(0.2)
+                        try:
+                            await asyncio.to_thread(
+                                self.agents_client.runs.submit_tool_outputs,
+                                thread_id=thread_id,
+                                run_id=run_id,
+                                tool_outputs=tool_outputs
+                            )
+                            logger.info(f"Successfully submitted tool outputs for run {run_id}")
+                            # Loop to re-poll status after tool execution
+                            await asyncio.sleep(0.5)
+                            continue
+                        except Exception as submit_error:
+                            logger.error(f"Failed to submit tool outputs: {submit_error}")
+                            break
+                    else:
+                        logger.warning(f"No tool outputs were produced for run {run_id}")
+                        break
                 elif status in {"completed", "failed", "cancelled"}:
                     logger.info(f"Run {run_id} reached terminal status: {status}")
                     return run
