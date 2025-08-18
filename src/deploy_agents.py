@@ -27,8 +27,8 @@ async def deploy_agent(agent_name, poml_file, description, tools=None):
         # Initialize the client with DefaultAzureCredential
         agent_client = AgentsClient(endpoint=project_endpoint, credential=DefaultAzureCredential())
 
-        # Deploy the agent
-        agent = agent_client.create_agent(
+        # Deploy the agent (create agent)
+        agent = agent_client.agents.create(
             name=agent_name,
             instructions=instructions,
             description=description,
@@ -48,7 +48,7 @@ async def deploy_agent(agent_name, poml_file, description, tools=None):
 
 async def main():
     print("🚀 Starting Agent Deployment Process")
-    print(f"Project: {os.getenv("AZURE_AI_FOUNDRY_PROJECT_NAME")}")
+    print(f"Project: {os.getenv('AZURE_AI_FOUNDRY_PROJECT_NAME')}")
     print(f"Endpoint: {project_endpoint}")
     print("=" * 50)
 
@@ -149,7 +149,7 @@ async def main():
     try:
         # Deploy Initial Intake Agent (no tools)
         initial_agent_id = await deploy_agent(
-            agent_name="InitialIntakeAgent",
+            agent_name="initial_intake_agent",
             poml_file="initial_agent",
             description="Handles initial client intake and basic queries."
         )
@@ -157,7 +157,7 @@ async def main():
 
         # Deploy Portal Agent
         portal_agent_id = await deploy_agent(
-            agent_name="PortalPilAgent",
+            agent_name="portal_claim_agent",
             poml_file="portal_agent",
             description="Assists with portal-related tasks and client interactions.",
             tools=portal_agent_tools

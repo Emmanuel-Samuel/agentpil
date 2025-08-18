@@ -40,6 +40,8 @@ class AIAgentService:
                 endpoint=settings.AZURE_AI_FOUNDRY_ENDPOINT,
                 credential=self.credential
             )
+            # Shared executor for blocking SDK calls
+            self.executor = _EXECUTOR
             self.agent_ids: Dict[str, str] = {}
             self.threads: Dict[str, str] = {}
             self.deployment_model_name = settings.AZURE_AI_FOUNDRY_DEPLOYMENT_MODEL_NAME
@@ -74,9 +76,20 @@ class AIAgentService:
                 logger.info(f"Using configured agent ID for: {agent_name}")
                 return self.agent_ids[agent_name]
             else:
-                error_message = f"Agent ID for '{agent_name}' not found in configuration."
-                logger.error(error_message)
-                raise ValueError(error_message)
+                # Create the agent if not configured
+                resolved_model = model or self.deployment_model_name
+                if not resolved_model:
+                    raise ValueError("Model deployment name is required to create agent")
+                logger.info(f"Creating agent '{agent_name}' with model '{resolved_model}'")
+                agent = await asyncio.to_thread(
+                    self.agents_client.agents.create,
+                    name=agent_name,
+                    instructions=instructions or "",
+                    model=resolved_model
+                )
+                self.agent_ids[agent_name] = agent.id
+                logger.info(f"Created agent '{agent_name}' with ID {agent.id}")
+                return agent.id
         except Exception as e:
             logger.error(f"Error in create_or_get_agent for {agent_name}: {str(e)}")
             raise
@@ -106,11 +119,12 @@ class AIAgentService:
             agent_id = await self.create_or_get_agent(agent_name, "")
             thread_id = await self.get_or_create_thread(user_id)
             # Add user message to thread
+            # Create message with explicit content structure per SDK
             message = await asyncio.to_thread(
                 self.agents_client.messages.create,
                 thread_id=thread_id,
                 role="user",
-                content=user_message
+                content=[{"type": "text", "text": user_message}]
             )
             logger.debug(f"Created message {message.id} in thread {thread_id}")
             # Create and run the agent (SDK handles polling and tool calls)
@@ -122,7 +136,8 @@ class AIAgentService:
             logger.debug(f"Created and processed run {run.id} for agent {agent_id}")
             # Check run status and fetch assistant message
             if run.status == "completed":
-                messages = await asyncio.to_thread(self.agents_client.messages.list, thread_id=thread_id)
+                # Ensure we have a concrete list for safe reverse iteration
+                messages = await asyncio.to_thread(lambda: list(self.agents_client.messages.list(thread_id=thread_id)))
                 for message in reversed(messages):
                     if getattr(message, "role", None) == "assistant":
                         response_text = None
@@ -189,7 +204,6 @@ class AIAgentService:
             return
 
         await self._create_message(thread_id=thread_id, role="user", content=user_message)
-        run = await self._start_run(agent_id=agent_id, thread_id=thread_id)
 
         # Use a queue to push tokens from blocking stream (thread) to async generator
         token_queue: asyncio.Queue[str | None] = asyncio.Queue()
@@ -197,14 +211,29 @@ class AIAgentService:
         def _producer():
             try:
                 from azure.ai.agents.models import MessageDeltaChunk, AgentStreamEvent
-                with self.agents_client.runs.stream(thread_id=thread_id, agent_id=agent_id) as stream:
-                    for event_type, event_data, _ in stream:
-                        if isinstance(event_data, MessageDeltaChunk):
-                            text = getattr(event_data, "text", None)
-                            if text:
-                                token_queue.put_nowait(text)
-                        elif event_type == AgentStreamEvent.ERROR:
-                            token_queue.put_nowait("[ERROR]")
+                # Use create_and_stream to start and stream the run in one call
+                with self.agents_client.runs.create_and_stream(thread_id=thread_id, agent_id=agent_id) as stream:
+                    for event in stream:
+                        try:
+                            # Prefer explicit event types when available
+                            if hasattr(event, "event") and event.event == AgentStreamEvent.MESSAGE_DELTA:
+                                data = getattr(event, "data", None)
+                                if isinstance(data, MessageDeltaChunk):
+                                    text = getattr(data, "text", None)
+                                    if text:
+                                        token_queue.put_nowait(text)
+                            elif hasattr(event, "event") and event.event == AgentStreamEvent.ERROR:
+                                token_queue.put_nowait("[ERROR]")
+                            else:
+                                # Fallback: try to read text directly from event-like tuples
+                                data = getattr(event, "data", None)
+                                if isinstance(data, MessageDeltaChunk):
+                                    text = getattr(data, "text", None)
+                                    if text:
+                                        token_queue.put_nowait(text)
+                        except Exception:
+                            # Ignore malformed events
+                            pass
             except Exception as e:
                 logger.error(f"Streaming producer error: {e}")
             finally:
@@ -221,3 +250,34 @@ class AIAgentService:
             if token is None:
                 break
             yield token
+
+
+    async def _has_active_run(self, thread_id: str) -> bool:
+        """Check if there is an active run for a thread to prevent overlapping runs."""
+        try:
+            runs = await asyncio.to_thread(lambda: list(self.agents_client.runs.list(thread_id=thread_id)))
+            for run in runs:
+                status = str(getattr(run, "status", "")).lower()
+                if status in {"queued", "in_progress", "requires_action"}:
+                    return True
+            return False
+        except Exception as e:
+            logger.warning(f"Failed to list runs for thread {thread_id}: {e}")
+            return False
+
+    async def _create_message(self, thread_id: str, role: str, content: str):
+        """Create a message in a thread using the expected content structure."""
+        return await asyncio.to_thread(
+            self.agents_client.messages.create,
+            thread_id=thread_id,
+            role=role,
+            content=[{"type": "text", "text": content}]
+        )
+
+    async def _start_run(self, agent_id: str, thread_id: str):
+        """Start and process a run for a thread/agent pair."""
+        return await asyncio.to_thread(
+            self.agents_client.runs.create_and_process,
+            thread_id=thread_id,
+            agent_id=agent_id
+        )
