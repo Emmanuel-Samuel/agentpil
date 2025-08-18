@@ -1,10 +1,16 @@
 import asyncio
 import logging
+import sys
+from pathlib import Path
 from contextlib import asynccontextmanager
+
+# Add the src directory to the Python path
+sys.path.append(str(Path(__file__).parent))
 from fastapi import FastAPI, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 
 from .config import settings
@@ -12,12 +18,15 @@ from .services.redis_service import RedisService
 from .services.cosmosdb_service import CosmosDBService
 from .services.ai_agent_service import AIAgentService
 from .services.poml_service import POMLService
+from .services import tools as tools_service
 
 # Set up logging
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL.upper()),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
+# Reduce Azure SDK HTTP logging verbosity
+logging.getLogger('azure.core.pipeline.policies.http_logging_policy').setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 # Global service instances
@@ -35,18 +44,36 @@ async def lifespan(app: FastAPI):
         # Initialize services
         logger.info("Initializing services...")
         
+        logger.info("Initializing RedisService...")
         redis_service = RedisService()
+        logger.info("RedisService initialized.")
+        
+        logger.info("Initializing CosmosDBService...")
         cosmosdb_service = CosmosDBService(
             url=settings.COSMOS_DB_URL,
             key=settings.COSMOS_DB_KEY,
             database_name=settings.COSMOS_DB_DATABASE_NAME,
             container_name=settings.COSMOS_DB_CONTAINER_NAME
         )
-        ai_agent_service = AIAgentService()
+        await cosmosdb_service.initialize()
+        logger.info("CosmosDBService initialized.")
+
+        logger.info("Initializing tools service...")
+        tools_service.initialize_tools(cosmosdb_service)
+        logger.info("Tools service initialized.")
+        
+        logger.info("Initializing AIAgentService...")
+        ai_agent_service = AIAgentService(redis_client=redis_service.redis)
+        logger.info("AIAgentService initialized.")
+        
+        logger.info("Initializing POMLService...")
         poml_service = POMLService(prompts_directory=settings.PROMPTS_DIRECTORY)
+        logger.info("POMLService initialized.")
         
         # Initialize AI agents with POML templates
+        logger.info("Initializing agents...")
         await initialize_agents()
+        logger.info("Agents initialized.")
         
         logger.info("Application startup complete")
         yield
@@ -201,6 +228,18 @@ async def chat_portal_endpoint(chat_message: ChatMessage, background_tasks: Back
     except Exception as e:
         logger.error(f"Error in portal chat endpoint: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.post("/chat/stream")
+async def chat_stream_endpoint(chat_message: ChatMessage):
+    """Stream agent response tokens for real-time UX."""
+    async def token_generator():
+        async for token in ai_agent_service.stream_agent_response(
+            agent_name="portal_claim_agent",  # or make this dynamic
+            user_id=chat_message.user_id,
+            user_message=chat_message.message
+        ):
+            yield token
+    return StreamingResponse(token_generator(), media_type="text/plain")
 
 @app.get("/health")
 async def health_check():

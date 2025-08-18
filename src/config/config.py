@@ -29,6 +29,13 @@ class Settings:
     
     INITIAL_INTAKE_AGENT_ID = os.getenv("INITIAL_INTAKE_AGENT_ID")
     PORTAL_AGENT_ID = os.getenv("PORTAL_AGENT_ID")
+
+    # Azure Function URLs
+    GET_CLAIM_BY_CONTACT_INFO_URL = os.getenv("GET_CLAIM_BY_CONTACT_INFO_URL")
+    HTTP_TRIGGER1_URL = os.getenv("HTTP_TRIGGER1_URL")
+    INITIATE_NEW_CLAIM_URL = os.getenv("INITIATE_NEW_CLAIM_URL")
+    TRANSITION_CLAIM_TYPE_URL = os.getenv("TRANSITION_CLAIM_TYPE_URL")
+    UPDATE_CLAIM_DATA_URL = os.getenv("UPDATE_CLAIM_DATA_URL")
     
     def __init__(self):
         """Validate required settings on initialization."""

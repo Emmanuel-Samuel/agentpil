@@ -1,6 +1,6 @@
 import os
 import json
-from poml.api import poml  # Assuming the poml library is available
+from services.poml_service import POMLService  # Correctly import the service
 
 # Directory containing POML files
 POML_DIR = os.path.join(os.path.dirname(__file__), 'prompts')
@@ -14,15 +14,23 @@ def preprocess_poml_to_json():
     """
     Convert POML files to JSON and save them.
     """
+    poml_service = POMLService(prompts_directory='prompts')
+    
     for filename in os.listdir(POML_DIR):
         if filename.endswith('.poml'):
-            poml_path = os.path.join(POML_DIR, filename)
+            template_name = os.path.splitext(filename)[0]
             try:
-                # Process the POML file into a dictionary format
-                processed_prompt = poml(poml_path, format="dict")
+                # Load the template content using the POMLService
+                template_content = poml_service.load_template(template_name)
+                
+                # Create a dictionary to store the processed prompt
+                processed_prompt = {
+                    "template_name": template_name,
+                    "content": template_content
+                }
 
                 # Save as JSON
-                json_filename = f"{os.path.splitext(filename)[0]}.json"
+                json_filename = f"{template_name}.json"
                 json_path = os.path.join(OUTPUT_DIR, json_filename)
                 with open(json_path, 'w') as json_file:
                     json.dump(processed_prompt, json_file, indent=4)

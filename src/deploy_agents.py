@@ -16,9 +16,9 @@ if not project_endpoint or not model_name:
     raise ValueError("Please set AZURE_AI_FOUNDRY_ENDPOINT and AZURE_AI_FOUNDRY_DEPLOYMENT_MODEL_NAME in your .env file.")
 
 # Initialize POMLService
-poml_service = POMLService(prompts_directory="src/prompts")
+poml_service = POMLService(prompts_directory="prompts")
 
-async def deploy_agent(agent_name, poml_file, description):
+async def deploy_agent(agent_name, poml_file, description, tools=None):
     print(f"--- Deploying {agent_name} ---")
     try:
         # Get agent instructions using POMLService
@@ -32,7 +32,8 @@ async def deploy_agent(agent_name, poml_file, description):
             name=agent_name,
             instructions=instructions,
             description=description,
-            model=model_name
+            model=model_name,
+            tools=tools
         )
 
         print(f"\n--- {agent_name} Deployment Successful ---")
@@ -47,12 +48,106 @@ async def deploy_agent(agent_name, poml_file, description):
 
 async def main():
     print("🚀 Starting Agent Deployment Process")
-    print(f"Project: {os.getenv('AZURE_AI_FOUNDRY_PROJECT_NAME')}")
+    print(f"Project: {os.getenv("AZURE_AI_FOUNDRY_PROJECT_NAME")}")
     print(f"Endpoint: {project_endpoint}")
     print("=" * 50)
 
+    # Manually define tools for the Portal Agent
+    portal_agent_tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "get_claim_by_contact_info",
+                "description": "Get claim details by providing either an email or a phone number",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "email": {"type": "string", "description": "Client's email address"},
+                        "phone": {"type": "string", "description": "Client's phone number"}
+                    },
+                    "required": [],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "initiate_new_claim",
+                "description": "Initiate a new claim for a user with the provided claim data",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "user_id": {"type": "string", "description": "Unique identifier for the user"},
+                        "claim_data": {"type": "object", "description": "Initial claim data including claim type"}
+                    },
+                    "required": ["user_id", "claim_data"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "transition_claim_type",
+                "description": "Transition an existing claim to a new type",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "claim_id": {"type": "string", "description": "Unique identifier for the claim"},
+                        "new_claim_type": {"type": "string", "description": "The new claim type to transition to"}
+                    },
+                    "required": ["claim_id", "new_claim_type"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "update_claim_data",
+                "description": "Update the data for an existing claim",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "claim_id": {"type": "string", "description": "Unique identifier for the claim"},
+                        "updates": {"type": "object", "description": "Data fields to be updated"}
+                    },
+                    "required": ["claim_id", "updates"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_question_by_fieldname",
+                "description": "Get the appropriate question text for a specific field based on claim type",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "field_name": {"type": "string", "description": "The name of the field needing information"},
+                        "claim_type": {"type": "string", "description": "The type of claim being processed"}
+                    },
+                    "required": ["field_name", "claim_type"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "search_knowledge_base",
+                "description": "Search the Azure Search knowledge base for relevant information",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Search query for the knowledge base"},
+                        "claim_type": {"type": "string", "description": "Filter by specific claim type"}
+                    },
+                    "required": ["query"],
+                },
+            },
+        }
+    ]
+
     try:
-        # Deploy Initial Intake Agent
+        # Deploy Initial Intake Agent (no tools)
         initial_agent_id = await deploy_agent(
             agent_name="InitialIntakeAgent",
             poml_file="initial_agent",
@@ -62,9 +157,10 @@ async def main():
 
         # Deploy Portal Agent
         portal_agent_id = await deploy_agent(
-            agent_name="PortalAgent",
+            agent_name="PortalPilAgent",
             poml_file="portal_agent",
-            description="Assists with portal-related tasks and client interactions."
+            description="Assists with portal-related tasks and client interactions.",
+            tools=portal_agent_tools
         )
         os.environ["PORTAL_AGENT_ID"] = portal_agent_id
 
