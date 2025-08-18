@@ -28,13 +28,42 @@ async def deploy_agent(agent_name, poml_file, description, tools=None):
         agent_client = AgentsClient(endpoint=project_endpoint, credential=DefaultAzureCredential())
 
         # Deploy the agent (create agent)
-        agent = agent_client.create_agent(
-            name=agent_name,
-            instructions=instructions,
-            description=description,
-            model=model_name,
-            tools=tools
-        )
+        try:
+            # Try different API patterns
+            if hasattr(agent_client, 'create_agent'):
+                agent = agent_client.create_agent(
+                    name=agent_name,
+                    instructions=instructions,
+                    description=description,
+                    model=model_name,
+                    tools=tools
+                )
+            elif hasattr(agent_client, 'agents') and hasattr(agent_client.agents, 'create'):
+                agent = agent_client.agents.create(
+                    name=agent_name,
+                    instructions=instructions,
+                    description=description,
+                    model=model_name,
+                    tools=tools
+                )
+            elif hasattr(agent_client, 'create'):
+                agent = agent_client.create(
+                    name=agent_name,
+                    instructions=instructions,
+                    description=description,
+                    model=model_name,
+                    tools=tools
+                )
+            else:
+                # List available methods for debugging
+                available_methods = [method for method in dir(agent_client) if not method.startswith('_')]
+                raise AttributeError(f"Available methods on AgentsClient: {available_methods}")
+        except Exception as api_error:
+            print(f"API Error: {api_error}")
+            # Try to get more info about the client
+            print(f"Client type: {type(agent_client)}")
+            print(f"Client dir: {[attr for attr in dir(agent_client) if not attr.startswith('_')]}")
+            raise
 
         print(f"\n--- {agent_name} Deployment Successful ---")
         print(f"Agent Name: {agent.name}")
