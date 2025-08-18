@@ -82,6 +82,7 @@ class AIAgentService:
                     )
                     logger.info(f"Agent {agent_name} has instructions: {getattr(agent, 'instructions', 'None')[:200]}...")
                     logger.info(f"Agent {agent_name} has tools: {getattr(agent, 'tools', 'None')}")
+                    logger.info(f"Agent {agent_name} model: {getattr(agent, 'model', 'None')}")
                 except Exception as e:
                     logger.warning(f"Could not retrieve agent details: {e}")
                 return self.agent_ids[agent_name]
@@ -129,8 +130,23 @@ class AIAgentService:
         try:
             agent_id = await self.create_or_get_agent(agent_name, "")
             thread_id = await self.get_or_create_thread(user_id)
-            # Add user message to thread
-            # Create message with explicit content structure per SDK
+            
+            # If we have chat history, add it to the thread first
+            if chat_history and len(chat_history) > 0:
+                logger.info(f"Adding {len(chat_history)} previous messages to thread {thread_id}")
+                for hist_msg in chat_history:
+                    if hist_msg.get("role") in ["user", "assistant"]:
+                        try:
+                            await asyncio.to_thread(
+                                self.agents_client.messages.create,
+                                thread_id=thread_id,
+                                role=hist_msg["role"],
+                                content=[{"type": "text", "text": hist_msg["content"]}]
+                            )
+                        except Exception as hist_e:
+                            logger.warning(f"Failed to add history message: {hist_e}")
+            
+            # Add current user message to thread
             message = await asyncio.to_thread(
                 self.agents_client.messages.create,
                 thread_id=thread_id,
@@ -138,8 +154,12 @@ class AIAgentService:
                 content=[{"type": "text", "text": user_message}]
             )
             logger.debug(f"Created message {message.id} in thread {thread_id}")
+            
             # Create a run and process tool calls if required
             try:
+                logger.info(f"Creating run for agent {agent_id} in thread {thread_id}")
+                logger.info(f"Current thread has messages: {len(await asyncio.to_thread(lambda: list(self.agents_client.messages.list(thread_id=thread_id)))}")
+                
                 run = await asyncio.to_thread(
                     self.agents_client.runs.create,
                     thread_id=thread_id,
@@ -153,6 +173,7 @@ class AIAgentService:
                 
             run = await self._process_run_until_complete(thread_id=thread_id, run_id=run.id)
             logger.debug(f"Processed run {run.id} to terminal status: {getattr(run, 'status', None)}")
+            
             # Check run status and fetch assistant message
             if run.status == "completed":
                 # Ensure we have a concrete list for safe reverse iteration
