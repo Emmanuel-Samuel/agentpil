@@ -2,7 +2,7 @@ import os
 import asyncio
 from dotenv import load_dotenv
 from azure.identity import DefaultAzureCredential
-from azure.ai.agents import AgentsClient
+from azure.ai.agents import AgentsClient, FunctionTool, ToolSet
 from services.poml_service import POMLService
 
 # Load environment variables
@@ -27,46 +27,46 @@ async def deploy_agent(agent_name, poml_file, description, tools=None):
         # Initialize the client with DefaultAzureCredential
         agent_client = AgentsClient(endpoint=project_endpoint, credential=DefaultAzureCredential())
 
-        # Deploy the agent (create agent)
-        try:
-            # Try different API patterns
-            if hasattr(agent_client, 'create_agent'):
-                agent = agent_client.create_agent(
-                    name=agent_name,
-                    instructions=instructions,
-                    description=description,
-                    model=model_name,
-                    tools=tools,
-                    tool_choice="auto"  # Enable automatic tool usage
-                )
-            elif hasattr(agent_client, 'agents') and hasattr(agent_client.agents, 'create'):
-                agent = agent_client.agents.create(
-                    name=agent_name,
-                    instructions=instructions,
-                    description=description,
-                    model=model_name,
-                    tools=tools,
-                    tool_choice="auto"  # Enable automatic tool usage
-                )
-            elif hasattr(agent_client, 'create'):
-                agent = agent_client.create(
-                    name=agent_name,
-                    instructions=instructions,
-                    description=description,
-                    model=model_name,
-                    tools=tools,
-                    tool_choice="auto"  # Enable automatic tool usage
-                )
-            else:
-                # List available methods for debugging
-                available_methods = [method for method in dir(agent_client) if not method.startswith('_')]
-                raise AttributeError(f"Available methods on AgentsClient: {available_methods}")
-        except Exception as api_error:
-            print(f"API Error: {api_error}")
-            # Try to get more info about the client
-            print(f"Client type: {type(agent_client)}")
-            print(f"Client dir: {[attr for attr in dir(agent_client) if not attr.startswith('_')]}")
-            raise
+        # Deploy the agent
+        if tools:
+            # Use FunctionTool and ToolSet for proper tool integration
+            print(f"Setting up tools for {agent_name}...")
+            
+            # Create a toolset and add function tools
+            toolset = ToolSet()
+            
+            # Convert the tools list to FunctionTool instances
+            for tool_def in tools:
+                if tool_def.get("type") == "function":
+                    func_name = tool_def["function"]["name"]
+                    # Import the actual function from tools service
+                    import src.services.tools as tools_service
+                    if hasattr(tools_service, func_name):
+                        func = getattr(tools_service, func_name)
+                        function_tool = FunctionTool({func_name: func})
+                        toolset.add(function_tool)
+                        print(f"Added function tool: {func_name}")
+                    else:
+                        print(f"Warning: Function {func_name} not found in tools service")
+            
+            # Enable auto function calls
+            agent_client.enable_auto_function_calls(toolset)
+            
+            agent = agent_client.create_agent(
+                name=agent_name,
+                instructions=instructions,
+                description=description,
+                model=model_name,
+                toolset=toolset
+            )
+        else:
+            # Create agent without tools
+            agent = agent_client.create_agent(
+                name=agent_name,
+                instructions=instructions,
+                description=description,
+                model=model_name
+            )
 
         print(f"\n--- {agent_name} Deployment Successful ---")
         print(f"Agent Name: {agent.name}")
