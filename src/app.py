@@ -100,6 +100,7 @@ async def initialize_agents():
         
         # Initialize Portal Agent (for future use)
         portal_instructions = poml_service.get_agent_instructions("portal_agent")
+        logger.info(f"Portal agent instructions loaded: {portal_instructions[:200]}...")
         await ai_agent_service.create_or_get_agent(
             agent_name="portal_claim_agent", 
             instructions=portal_instructions

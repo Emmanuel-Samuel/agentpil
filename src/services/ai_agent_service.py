@@ -74,6 +74,16 @@ class AIAgentService:
         try:
             if agent_name in self.agent_ids:
                 logger.info(f"Using configured agent ID for: {agent_name}")
+                # Log the agent details to see what it has
+                try:
+                    agent = await asyncio.to_thread(
+                        self.agents_client.agents.get,
+                        agent_id=self.agent_ids[agent_name]
+                    )
+                    logger.info(f"Agent {agent_name} has instructions: {getattr(agent, 'instructions', 'None')[:200]}...")
+                    logger.info(f"Agent {agent_name} has tools: {getattr(agent, 'tools', 'None')}")
+                except Exception as e:
+                    logger.warning(f"Could not retrieve agent details: {e}")
                 return self.agent_ids[agent_name]
             else:
                 # Create the agent if not configured
@@ -81,6 +91,7 @@ class AIAgentService:
                 if not resolved_model:
                     raise ValueError("Model deployment name is required to create agent")
                 logger.info(f"Creating agent '{agent_name}' with model '{resolved_model}'")
+                logger.info(f"Creating agent with instructions: {instructions[:200]}...")
                 agent = await asyncio.to_thread(
                     self.agents_client.agents.create,
                     name=agent_name,
