@@ -128,12 +128,18 @@ class AIAgentService:
             )
             logger.debug(f"Created message {message.id} in thread {thread_id}")
             # Create a run and process tool calls if required
-            run = await asyncio.to_thread(
-                self.agents_client.runs.create,
-                thread_id=thread_id,
-                agent_id=agent_id
-            )
-            logger.debug(f"Created run {run.id} for agent {agent_id}")
+            try:
+                run = await asyncio.to_thread(
+                    self.agents_client.runs.create,
+                    thread_id=thread_id,
+                    agent_id=agent_id
+                )
+                logger.debug(f"Created run {run.id} for agent {agent_id}")
+                logger.info(f"Starting run processing for run {run.id}")
+            except Exception as run_create_error:
+                logger.error(f"Failed to create run: {run_create_error}")
+                return "I'm sorry, I encountered an error while starting the conversation. Please try again."
+                
             run = await self._process_run_until_complete(thread_id=thread_id, run_id=run.id)
             logger.debug(f"Processed run {run.id} to terminal status: {getattr(run, 'status', None)}")
             # Check run status and fetch assistant message
@@ -287,27 +293,41 @@ class AIAgentService:
     async def _process_run_until_complete(self, thread_id: str, run_id: str):
         """Poll a run until it reaches a terminal state, handling required tool actions."""
         try:
+            logger.info(f"Processing run {run_id} until completion...")
+            start_time = asyncio.get_event_loop().time()
+            max_wait_time = 60  # 60 seconds timeout
+            
             while True:
+                # Check timeout
+                if asyncio.get_event_loop().time() - start_time > max_wait_time:
+                    logger.error(f"Run {run_id} processing timed out after {max_wait_time} seconds")
+                    break
+                    
                 run = await asyncio.to_thread(
                     self.agents_client.runs.get,
                     thread_id=thread_id,
                     run_id=run_id
                 )
                 status = str(getattr(run, "status", "")).lower()
+                logger.info(f"Run {run_id} status: {status}")
+                
                 if status == "requires_action":
+                    logger.info(f"Run {run_id} requires action, processing tool calls...")
                     required = getattr(run, "required_action", None)
                     if not required:
+                        logger.warning(f"Run {run_id} requires_action but no required_action found")
                         # Defensive: break to avoid infinite loop
                         break
                     submit = getattr(required, "submit_tool_outputs", None)
                     tool_calls = getattr(submit, "tool_calls", []) if submit else []
+                    logger.info(f"Run {run_id} has {len(tool_calls)} tool calls to process")
                     tool_outputs = []
                     for tc in tool_calls:
                         try:
                             # Extract tool name and arguments defensively
                             func_container = getattr(tc, "function", None)
                             tool_name = None
-                            tool_args = {}
+                            raw_args = None
                             if func_container is not None:
                                 tool_name = getattr(func_container, "name", None)
                                 raw_args = getattr(func_container, "arguments", None)
@@ -315,6 +335,7 @@ class AIAgentService:
                                 tool_name = getattr(tc, "name", None)
                                 raw_args = getattr(tc, "arguments", None)
 
+                            logger.info(f"Processing tool call: {tool_name} with args: {raw_args}")
                             if raw_args and isinstance(raw_args, str):
                                 try:
                                     tool_args = json.loads(raw_args)
@@ -322,6 +343,8 @@ class AIAgentService:
                                     tool_args = {}
                             elif isinstance(raw_args, dict):
                                 tool_args = raw_args
+                            else:
+                                tool_args = {}
 
                             output_str = ""
                             if tool_name in self.callable_tools:
@@ -330,7 +353,9 @@ class AIAgentService:
                                     output_str = await tool_fn(**tool_args)
                                 else:
                                     output_str = await asyncio.to_thread(tool_fn, **tool_args)
+                                logger.info(f"Tool {tool_name} returned: {output_str}")
                             else:
+                                logger.warning(f"Unknown tool: {tool_name}")
                                 output_str = json.dumps({"status": "error", "message": f"Unknown tool: {tool_name}"})
 
                             tool_outputs.append({
@@ -341,6 +366,7 @@ class AIAgentService:
                             logger.error(f"Error executing tool call: {tool_exc}")
                     if tool_outputs:
                         # Submit outputs and continue
+                        logger.info(f"Submitting {len(tool_outputs)} tool outputs for run {run_id}")
                         await asyncio.to_thread(
                             self.agents_client.runs.submit_tool_outputs,
                             thread_id=thread_id,
@@ -353,14 +379,26 @@ class AIAgentService:
                     # If no tool outputs were produced, avoid tight loop
                     await asyncio.sleep(0.2)
                 elif status in {"completed", "failed", "cancelled"}:
+                    logger.info(f"Run {run_id} reached terminal status: {status}")
                     return run
                 else:
+                    logger.debug(f"Run {run_id} status: {status}, waiting...")
                     await asyncio.sleep(0.2)
         except Exception as e:
             logger.error(f"Error processing run {run_id}: {e}")
+            logger.error(f"Run {run_id} processing failed, returning last known state")
         # Fallback return last known run state
-        return await asyncio.to_thread(
-            self.agents_client.runs.get,
-            thread_id=thread_id,
-            run_id=run_id
-        )
+        try:
+            return await asyncio.to_thread(
+                self.agents_client.runs.get,
+                thread_id=thread_id,
+                run_id=run_id
+            )
+        except Exception as fallback_e:
+            logger.error(f"Failed to get fallback run state: {fallback_e}")
+            # Return a mock run object with failed status
+            class MockRun:
+                def __init__(self):
+                    self.status = "failed"
+                    self.last_error = "Failed to retrieve run state"
+            return MockRun()
