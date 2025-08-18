@@ -353,6 +353,10 @@ class AIAgentService:
                 status = status_str.strip().lower()
                 logger.info(f"Run {run_id} status: {status}")
                 
+                # Log more details about the run
+                logger.info(f"Run {run_id} details: {getattr(run, 'required_action', 'None')}")
+                logger.info(f"Run {run_id} last_error: {getattr(run, 'last_error', 'None')}")
+                
                 if status == "requires_action":
                     logger.info(f"Run {run_id} requires action, processing tool calls...")
                     required = getattr(run, "required_action", None)
