@@ -127,13 +127,15 @@ class AIAgentService:
                 content=[{"type": "text", "text": user_message}]
             )
             logger.debug(f"Created message {message.id} in thread {thread_id}")
-            # Create and run the agent (SDK handles polling and tool calls)
+            # Create a run and process tool calls if required
             run = await asyncio.to_thread(
-                self.agents_client.runs.create_and_process,
+                self.agents_client.runs.create,
                 thread_id=thread_id,
                 agent_id=agent_id
             )
-            logger.debug(f"Created and processed run {run.id} for agent {agent_id}")
+            logger.debug(f"Created run {run.id} for agent {agent_id}")
+            run = await self._process_run_until_complete(thread_id=thread_id, run_id=run.id)
+            logger.debug(f"Processed run {run.id} to terminal status: {getattr(run, 'status', None)}")
             # Check run status and fetch assistant message
             if run.status == "completed":
                 # Ensure we have a concrete list for safe reverse iteration
@@ -280,4 +282,85 @@ class AIAgentService:
             self.agents_client.runs.create_and_process,
             thread_id=thread_id,
             agent_id=agent_id
+        )
+
+    async def _process_run_until_complete(self, thread_id: str, run_id: str):
+        """Poll a run until it reaches a terminal state, handling required tool actions."""
+        try:
+            while True:
+                run = await asyncio.to_thread(
+                    self.agents_client.runs.get,
+                    thread_id=thread_id,
+                    run_id=run_id
+                )
+                status = str(getattr(run, "status", "")).lower()
+                if status == "requires_action":
+                    required = getattr(run, "required_action", None)
+                    if not required:
+                        # Defensive: break to avoid infinite loop
+                        break
+                    submit = getattr(required, "submit_tool_outputs", None)
+                    tool_calls = getattr(submit, "tool_calls", []) if submit else []
+                    tool_outputs = []
+                    for tc in tool_calls:
+                        try:
+                            # Extract tool name and arguments defensively
+                            func_container = getattr(tc, "function", None)
+                            tool_name = None
+                            tool_args = {}
+                            if func_container is not None:
+                                tool_name = getattr(func_container, "name", None)
+                                raw_args = getattr(func_container, "arguments", None)
+                            else:
+                                tool_name = getattr(tc, "name", None)
+                                raw_args = getattr(tc, "arguments", None)
+
+                            if raw_args and isinstance(raw_args, str):
+                                try:
+                                    tool_args = json.loads(raw_args)
+                                except Exception:
+                                    tool_args = {}
+                            elif isinstance(raw_args, dict):
+                                tool_args = raw_args
+
+                            output_str = ""
+                            if tool_name in self.callable_tools:
+                                tool_fn = self.callable_tools[tool_name]
+                                if asyncio.iscoroutinefunction(tool_fn):
+                                    output_str = await tool_fn(**tool_args)
+                                else:
+                                    output_str = await asyncio.to_thread(tool_fn, **tool_args)
+                            else:
+                                output_str = json.dumps({"status": "error", "message": f"Unknown tool: {tool_name}"})
+
+                            tool_outputs.append({
+                                "tool_call_id": getattr(tc, "id", None) or getattr(tc, "tool_call_id", None),
+                                "output": output_str or ""
+                            })
+                        except Exception as tool_exc:
+                            logger.error(f"Error executing tool call: {tool_exc}")
+                    if tool_outputs:
+                        # Submit outputs and continue
+                        await asyncio.to_thread(
+                            self.agents_client.runs.submit_tool_outputs,
+                            thread_id=thread_id,
+                            run_id=run_id,
+                            tool_outputs=tool_outputs
+                        )
+                        # Loop to re-poll status
+                        await asyncio.sleep(0.2)
+                        continue
+                    # If no tool outputs were produced, avoid tight loop
+                    await asyncio.sleep(0.2)
+                elif status in {"completed", "failed", "cancelled"}:
+                    return run
+                else:
+                    await asyncio.sleep(0.2)
+        except Exception as e:
+            logger.error(f"Error processing run {run_id}: {e}")
+        # Fallback return last known run state
+        return await asyncio.to_thread(
+            self.agents_client.runs.get,
+            thread_id=thread_id,
+            run_id=run_id
         )
