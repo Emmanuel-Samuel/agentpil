@@ -77,7 +77,7 @@ class AIAgentService:
                 # Log the agent details to see what it has
                 try:
                     agent = await asyncio.to_thread(
-                        self.agents_client.agents.get,
+                        self.agents_client.get_agent,
                         agent_id=self.agent_ids[agent_name]
                     )
                     logger.info(f"Agent {agent_name} has instructions: {getattr(agent, 'instructions', 'None')[:200]}...")
@@ -93,7 +93,7 @@ class AIAgentService:
                 logger.info(f"Creating agent '{agent_name}' with model '{resolved_model}'")
                 logger.info(f"Creating agent with instructions: {instructions[:200]}...")
                 agent = await asyncio.to_thread(
-                    self.agents_client.agents.create,
+                    self.agents_client.create_agent,
                     name=agent_name,
                     instructions=instructions or "",
                     model=resolved_model

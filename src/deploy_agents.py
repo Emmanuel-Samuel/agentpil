@@ -28,7 +28,7 @@ async def deploy_agent(agent_name, poml_file, description, tools=None):
         agent_client = AgentsClient(endpoint=project_endpoint, credential=DefaultAzureCredential())
 
         # Deploy the agent (create agent)
-        agent = agent_client.agents.create(
+        agent = agent_client.create_agent(
             name=agent_name,
             instructions=instructions,
             description=description,
