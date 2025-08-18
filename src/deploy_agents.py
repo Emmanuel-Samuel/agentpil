@@ -36,7 +36,8 @@ async def deploy_agent(agent_name, poml_file, description, tools=None):
                     instructions=instructions,
                     description=description,
                     model=model_name,
-                    tools=tools
+                    tools=tools,
+                    tool_choice="auto"  # Enable automatic tool usage
                 )
             elif hasattr(agent_client, 'agents') and hasattr(agent_client.agents, 'create'):
                 agent = agent_client.agents.create(
@@ -44,7 +45,8 @@ async def deploy_agent(agent_name, poml_file, description, tools=None):
                     instructions=instructions,
                     description=description,
                     model=model_name,
-                    tools=tools
+                    tools=tools,
+                    tool_choice="auto"  # Enable automatic tool usage
                 )
             elif hasattr(agent_client, 'create'):
                 agent = agent_client.create(
@@ -52,7 +54,8 @@ async def deploy_agent(agent_name, poml_file, description, tools=None):
                     instructions=instructions,
                     description=description,
                     model=model_name,
-                    tools=tools
+                    tools=tools,
+                    tool_choice="auto"  # Enable automatic tool usage
                 )
             else:
                 # List available methods for debugging

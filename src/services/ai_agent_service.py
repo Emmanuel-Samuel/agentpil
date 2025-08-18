@@ -363,6 +363,14 @@ class AIAgentService:
                 if run_attrs:
                     logger.info(f"Run {run_id} has tool-related attributes: {run_attrs}")
                 
+                # Log the actual tool configuration values
+                if hasattr(run, 'tool_choice'):
+                    logger.info(f"Run {run_id} tool_choice: {getattr(run, 'tool_choice')}")
+                if hasattr(run, 'tools'):
+                    logger.info(f"Run {run_id} tools: {getattr(run, 'tools')}")
+                if hasattr(run, 'parallel_tool_calls'):
+                    logger.info(f"Run {run_id} parallel_tool_calls: {getattr(run, 'parallel_tool_calls')}")
+                
                 if status == "requires_action":
                     logger.info(f"Run {run_id} requires action, processing tool calls...")
                     required = getattr(run, "required_action", None)
