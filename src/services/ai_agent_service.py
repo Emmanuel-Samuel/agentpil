@@ -265,7 +265,12 @@ class AIAgentService:
         try:
             runs = await asyncio.to_thread(lambda: list(self.agents_client.runs.list(thread_id=thread_id)))
             for run in runs:
-                status = str(getattr(run, "status", "")).lower()
+                status_obj = getattr(run, "status", "")
+                status_str = str(status_obj)
+                # Normalize enum-like values such as 'RunStatus.completed' or 'runstatus.completed'
+                if "." in status_str:
+                    status_str = status_str.split(".")[-1]
+                status = status_str.strip().lower()
                 if status in {"queued", "in_progress", "requires_action"}:
                     return True
             return False
@@ -308,7 +313,12 @@ class AIAgentService:
                     thread_id=thread_id,
                     run_id=run_id
                 )
-                status = str(getattr(run, "status", "")).lower()
+                status_obj = getattr(run, "status", "")
+                status_str = str(status_obj)
+                # Normalize enum-like values such as 'RunStatus.completed' or 'runstatus.completed'
+                if "." in status_str:
+                    status_str = status_str.split(".")[-1]
+                status = status_str.strip().lower()
                 logger.info(f"Run {run_id} status: {status}")
                 
                 if status == "requires_action":
