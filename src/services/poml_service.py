@@ -57,8 +57,7 @@ class POMLService:
         """
         Render a POML template with context variables.
         
-        This is a simplified POML renderer. In a full implementation,
-        you would use the poml-core library for complete POML parsing.
+        This is a simplified POML renderer that extracts system instructions from XML format.
         """
         try:
             rendered = template_content
@@ -68,35 +67,62 @@ class POMLService:
                 placeholder = f"{{{{{key}}}}}"
                 rendered = rendered.replace(placeholder, str(value))
             
-            # Extract system prompt from POML format
-            # POML format typically has "System:" followed by the system message
+            # Extract system prompt from POML XML format
+            # Look for <Paragraph speaker="system"> sections
+            system_instructions = []
+            
+            # Split by lines and look for system paragraphs
             lines = rendered.split('\n')
-            system_lines = []
+            in_system_section = False
             current_section = None
             
             for line in lines:
                 line = line.strip()
-                if line.startswith('System:'):
-                    current_section = 'system'
+                
+                # Check for section captions that might contain important context
+                if line.startswith('<Section caption='):
+                    caption = line.split('"')[1] if '"' in line else ""
+                    if caption in ["Role Definition", "Behavioral Guidelines", "Workflow", "Tools"]:
+                        current_section = caption
+                        continue
+                
+                # Check for system paragraphs
+                if '<Paragraph speaker="system">' in line:
+                    in_system_section = True
                     continue
-                elif line.startswith('User:'):
-                    current_section = 'user'
+                elif '</Paragraph>' in line:
+                    in_system_section = False
                     continue
-                elif line.startswith('Assistant:'):
-                    current_section = 'assistant'
-                    continue
-                elif line and current_section == 'system':
-                    system_lines.append(line)
-                elif line and current_section == 'user':
-                    # User lines are not used for system prompt
-                    pass
+                elif in_system_section and line:
+                    # Clean up XML tags and add to system instructions
+                    clean_line = line.replace('<', ' ').replace('>', ' ').strip()
+                    if clean_line:
+                        system_instructions.append(clean_line)
+                
+                # Also capture important workflow instructions
+                elif current_section == "Workflow" and line and not line.startswith('<'):
+                    clean_line = line.replace('<', ' ').replace('>', ' ').strip()
+                    if clean_line and len(clean_line) > 10:  # Only meaningful lines
+                        system_instructions.append(clean_line)
             
-            # Return the system message portion (main instructions for the agent)
-            if system_lines:
-                return ' '.join(system_lines)
+            # If we found system instructions, return them
+            if system_instructions:
+                # Add explicit tool usage instructions
+                tool_instructions = """
+IMPORTANT: You have access to several tools that you MUST use to help clients. When a client asks about their claim or wants to complete a claim form, you should:
+1. First ask for their contact information (email or phone)
+2. Use the get_claim_by_contact_info tool to look up their existing claims
+3. Based on the result, either help them complete missing information or start a new claim
+4. Use the appropriate tools (update_claim_data, transition_claim_type, etc.) as needed
+
+Always use the available tools rather than just providing generic responses. Follow the workflow defined in your instructions.
+"""
+                return ' '.join(system_instructions) + tool_instructions
             else:
                 # Fallback to entire rendered content if no System section found
-                return rendered.strip()
+                # But clean up XML tags
+                cleaned = rendered.replace('<', ' ').replace('>', ' ').replace('&amp;', '&')
+                return cleaned.strip()
                 
         except Exception as e:
             logger.error(f"Error rendering template: {str(e)}")
