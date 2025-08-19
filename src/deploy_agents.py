@@ -1,5 +1,11 @@
 import os
 import asyncio
+import sys
+from pathlib import Path
+
+# Add the src directory to the Python path
+sys.path.append(str(Path(__file__).parent))
+
 from dotenv import load_dotenv
 from azure.identity import DefaultAzureCredential
 from azure.ai.agents import AgentsClient
@@ -28,13 +34,23 @@ async def deploy_agent(agent_name, poml_file, description, tools=None):
         agent_client = AgentsClient(endpoint=project_endpoint, credential=DefaultAzureCredential())
 
         # Deploy the agent
-        agent = agent_client.create_agent(
-            name=agent_name,
-            instructions=instructions,
-            description=description,
-            model=model_name,
-            tools=tools
-        )
+        if tools:
+            # Create agent with tools
+            agent = agent_client.create_agent(
+                name=agent_name,
+                instructions=instructions,
+                description=description,
+                model=model_name,
+                tools=tools
+            )
+        else:
+            # Create agent without tools
+            agent = agent_client.create_agent(
+                name=agent_name,
+                instructions=instructions,
+                description=description,
+                model=model_name
+            )
 
         print(f"\n--- {agent_name} Deployment Successful ---")
         print(f"Agent Name: {agent.name}")
@@ -48,127 +64,130 @@ async def deploy_agent(agent_name, poml_file, description, tools=None):
 
 async def main():
     print("🚀 Starting Agent Deployment Process")
-    print(f"Project: {os.getenv("AZURE_AI_FOUNDRY_PROJECT_NAME")}")
+    print(f"Project: {os.getenv('AZURE_AI_FOUNDRY_PROJECT_NAME')}")
     print(f"Endpoint: {project_endpoint}")
     print("=" * 50)
 
-    # Manually define tools for the Portal Agent
+    # Import the actual tool definitions from your tools service
+    from services import tools as tools_service
+    
+    # Format tools properly for Azure AI Agents API
     portal_agent_tools = [
         {
             "type": "function",
             "function": {
                 "name": "get_claim_by_contact_info",
-                "description": "Get claim details by providing either an email or a phone number",
+                "description": "Get claim details by providing either an email or a phone number.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "email": {"type": "string", "description": "Client's email address"},
-                        "phone": {"type": "string", "description": "Client's phone number"}
+                        "email": {
+                            "type": "string",
+                            "description": "The email address associated with the claim"
+                        },
+                        "phone": {
+                            "type": "string",
+                            "description": "The phone number associated with the claim"
+                        }
                     },
-                    "required": [],
-                },
-            },
+                    "required": []
+                }
+            }
         },
         {
-            "type": "function",
+            "type": "function", 
             "function": {
                 "name": "initiate_new_claim",
-                "description": "Initiate a new claim for a user with the provided claim data",
+                "description": "Initiate a new claim for a user with the provided claim data.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "user_id": {"type": "string", "description": "Unique identifier for the user"},
-                        "claim_data": {"type": "object", "description": "Initial claim data including claim type"}
+                        "user_id": {
+                            "type": "string",
+                            "description": "The user ID initiating the claim"
+                        },
+                        "claim_data": {
+                            "type": "object",
+                            "description": "The claim data to initialize"
+                        }
                     },
-                    "required": ["user_id", "claim_data"],
-                },
-            },
+                    "required": ["user_id", "claim_data"]
+                }
+            }
         },
         {
             "type": "function",
             "function": {
                 "name": "transition_claim_type",
-                "description": "Transition an existing claim to a new type",
+                "description": "Updates an existing claim with a new claim type.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "claim_id": {"type": "string", "description": "Unique identifier for the claim"},
-                        "new_claim_type": {"type": "string", "description": "The new claim type to transition to"}
+                        "claim_id": {
+                            "type": "string",
+                            "description": "The ID of the claim to update"
+                        },
+                        "new_claim_type": {
+                            "type": "string",
+                            "description": "The new claim type to set"
+                        }
                     },
-                    "required": ["claim_id", "new_claim_type"],
-                },
-            },
+                    "required": ["claim_id", "new_claim_type"]
+                }
+            }
         },
         {
             "type": "function",
             "function": {
                 "name": "update_claim_data",
-                "description": "Update the data for an existing claim",
+                "description": "Update the data for an existing claim.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "claim_id": {"type": "string", "description": "Unique identifier for the claim"},
-                        "updates": {"type": "object", "description": "Data fields to be updated"}
+                        "claim_id": {
+                            "type": "string",
+                            "description": "The ID of the claim to update"
+                        },
+                        "updates": {
+                            "type": "object",
+                            "description": "The updates to apply to the claim"
+                        }
                     },
-                    "required": ["claim_id", "updates"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "get_question_by_fieldname",
-                "description": "Get the appropriate question text for a specific field based on claim type",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "field_name": {"type": "string", "description": "The name of the field needing information"},
-                        "claim_type": {"type": "string", "description": "The type of claim being processed"}
-                    },
-                    "required": ["field_name", "claim_type"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "search_knowledge_base",
-                "description": "Search the Azure Search knowledge base for relevant information",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string", "description": "Search query for the knowledge base"},
-                        "claim_type": {"type": "string", "description": "Filter by specific claim type"}
-                    },
-                    "required": ["query"],
-                },
-            },
+                    "required": ["claim_id", "updates"]
+                }
+            }
         }
     ]
-
+    
     try:
         # Deploy Initial Intake Agent (no tools)
         initial_agent_id = await deploy_agent(
-            agent_name="InitialIntakeAgent",
+            agent_name="initial_intake_agent",
             poml_file="initial_agent",
             description="Handles initial client intake and basic queries."
         )
-        os.environ["INITIAL_INTAKE_AGENT_ID"] = initial_agent_id
+        print(f"Set INITIAL_INTAKE_AGENT_ID={initial_agent_id} in your .env file")
 
         # Deploy Portal Agent
         portal_agent_id = await deploy_agent(
-            agent_name="PortalPilAgent",
+            agent_name="portal_claim_agent",
             poml_file="portal_agent",
             description="Assists with portal-related tasks and client interactions.",
             tools=portal_agent_tools
         )
-        os.environ["PORTAL_AGENT_ID"] = portal_agent_id
+        print(f"Set PORTAL_AGENT_ID={portal_agent_id} in your .env file")
 
-        print("\nAll agents deployed successfully!")
+        print("\n✅ All agents deployed successfully!")
+        print("\n📝 Next steps:")
+        print("1. Add these environment variables to your .env file:")
+        print(f"   INITIAL_INTAKE_AGENT_ID={initial_agent_id}")
+        print(f"   PORTAL_AGENT_ID={portal_agent_id}")
+        print("2. Restart your application to use the pre-deployed agents")
 
     except Exception as e:
-        print("\nDeployment process encountered errors.")
+        print("\n❌ Deployment process encountered errors.")
         print(f"Error: {e}")
+        raise
 
 if __name__ == "__main__":
     asyncio.run(main())

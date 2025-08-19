@@ -3,9 +3,7 @@ import logging
 import sys
 from pathlib import Path
 from contextlib import asynccontextmanager
-
-# Add the src directory to the Python path
-sys.path.append(str(Path(__file__).parent))
+import uvicorn
 from fastapi import FastAPI, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 from typing import Optional
@@ -49,26 +47,34 @@ async def lifespan(app: FastAPI):
         logger.info("RedisService initialized.")
         
         logger.info("Initializing CosmosDBService...")
-        cosmosdb_service = CosmosDBService(
-            url=settings.COSMOS_DB_URL,
-            key=settings.COSMOS_DB_KEY,
-            database_name=settings.COSMOS_DB_DATABASE_NAME,
-            container_name=settings.COSMOS_DB_CONTAINER_NAME
-        )
-        await cosmosdb_service.initialize()
-        logger.info("CosmosDBService initialized.")
-
+        if settings.COSMOS_DB_URL and settings.COSMOS_DB_KEY and settings.COSMOS_DB_DATABASE_NAME and settings.COSMOS_DB_CONTAINER_NAME:
+            cosmosdb_service = CosmosDBService(
+                url=settings.COSMOS_DB_URL,
+                key=settings.COSMOS_DB_KEY,
+                database_name=settings.COSMOS_DB_DATABASE_NAME,
+                container_name=settings.COSMOS_DB_CONTAINER_NAME
+            )
+            await cosmosdb_service.initialize()
+        else:
+            logger.warning("CosmosDB credentials not found, skipping initialization.")
+        
         logger.info("Initializing tools service...")
         tools_service.initialize_tools(cosmosdb_service)
         logger.info("Tools service initialized.")
         
         logger.info("Initializing AIAgentService...")
-        ai_agent_service = AIAgentService(redis_client=redis_service.redis)
-        logger.info("AIAgentService initialized.")
+        if redis_service:
+            ai_agent_service = AIAgentService(redis_client=redis_service.redis)
+            logger.info("AIAgentService initialized.")
+        else:
+            logger.warning("Redis service not available, skipping AIAgentService initialization.")
         
         logger.info("Initializing POMLService...")
-        poml_service = POMLService(prompts_directory=settings.PROMPTS_DIRECTORY)
-        logger.info("POMLService initialized.")
+        if settings.PROMPTS_DIRECTORY:
+            poml_service = POMLService(prompts_directory=settings.PROMPTS_DIRECTORY)
+            logger.info("POMLService initialized.")
+        else:
+            logger.warning("Prompts directory not found, skipping POMLService initialization.")
         
         # Initialize AI agents with POML templates
         logger.info("Initializing agents...")
@@ -89,22 +95,28 @@ async def lifespan(app: FastAPI):
 
 async def initialize_agents():
     """Initialize AI agents with their POML-defined instructions."""
+    if not poml_service or not ai_agent_service:
+        logger.warning("Skipping agent initialization due to missing services.")
+        return
     try:
         # Initialize Initial Intake Agent
         initial_instructions = poml_service.get_agent_instructions("initial_agent")
-        await ai_agent_service.create_or_get_agent(
-            agent_name="initial_intake_agent",
-            instructions=initial_instructions
-        )
-        logger.info("Initialized initial_intake_agent")
+        if initial_instructions:
+            await ai_agent_service.create_or_get_agent(
+                agent_name="initial_intake_agent",
+                instructions=initial_instructions
+            )
+            logger.info("Initialized initial_intake_agent")
         
         # Initialize Portal Agent (for future use)
         portal_instructions = poml_service.get_agent_instructions("portal_agent")
-        await ai_agent_service.create_or_get_agent(
-            agent_name="portal_claim_agent", 
-            instructions=portal_instructions
-        )
-        logger.info("Initialized portal_claim_agent")
+        if portal_instructions:
+            logger.info(f"Portal agent instructions loaded: {portal_instructions[:200]}...")
+            await ai_agent_service.create_or_get_agent(
+                agent_name="portal_claim_agent", 
+                instructions=portal_instructions
+            )
+            logger.info("Initialized portal_claim_agent")
         
     except Exception as e:
         logger.error(f"Error initializing agents: {str(e)}")
@@ -130,6 +142,8 @@ class ChatResponse(BaseModel):
 @app.post("/chat/initial", response_model=ChatResponse)
 async def chat_initial_endpoint(chat_message: ChatMessage, background_tasks: BackgroundTasks):
     """Handle initial intake agent conversations."""
+    if not redis_service or not ai_agent_service:
+        raise HTTPException(status_code=503, detail="Services not available")
     try:
         user_id = chat_message.user_id
         user_message = chat_message.message
@@ -139,13 +153,7 @@ async def chat_initial_endpoint(chat_message: ChatMessage, background_tasks: Bac
         # Get conversation history from Redis
         history = await redis_service.get_chat_history(user_id)
         
-        # Get POML context for the agent
-        poml_context = {
-            'user_message': user_message,
-            'user_id': user_id,
-        }
-        
-        # Get response from Initial Intake Agent
+        # Get response from Initial Intake Agent using the new method
         ai_response_content = await ai_agent_service.get_agent_response(
             agent_name="initial_intake_agent",
             user_id=user_id,
@@ -161,11 +169,12 @@ async def chat_initial_endpoint(chat_message: ChatMessage, background_tasks: Bac
         updated_history = await redis_service.get_chat_history(user_id)
         
         # Save to Cosmos DB in background (long-term)
-        background_tasks.add_task(
-            cosmosdb_service.save_conversation, 
-            user_id, 
-            updated_history
-        )
+        if cosmosdb_service:
+            background_tasks.add_task(
+                cosmosdb_service.save_conversation, 
+                user_id, 
+                updated_history
+            )
         
         logger.info(f"Successfully processed initial chat for user {user_id}")
         
@@ -181,6 +190,8 @@ async def chat_initial_endpoint(chat_message: ChatMessage, background_tasks: Bac
 @app.post("/chat/portal", response_model=ChatResponse)
 async def chat_portal_endpoint(chat_message: ChatMessage, background_tasks: BackgroundTasks):
     """Handle portal agent conversations for authenticated users."""
+    if not redis_service or not ai_agent_service:
+        raise HTTPException(status_code=503, detail="Services not available")
     try:
         user_id = chat_message.user_id
         user_message = chat_message.message
@@ -190,13 +201,7 @@ async def chat_portal_endpoint(chat_message: ChatMessage, background_tasks: Back
         # Get conversation history from Redis
         history = await redis_service.get_chat_history(user_id)
         
-        # Get POML context for the agent
-        poml_context = {
-            'user_message': user_message,
-            'user_id': user_id,
-        }
-        
-        # Get response from Portal Claim Agent
+        # Get response from Portal Claim Agent using the Azure-style method
         ai_response_content = await ai_agent_service.get_agent_response(
             agent_name="portal_claim_agent",
             user_id=user_id,
@@ -212,11 +217,12 @@ async def chat_portal_endpoint(chat_message: ChatMessage, background_tasks: Back
         updated_history = await redis_service.get_chat_history(user_id)
         
         # Save to Cosmos DB in background (long-term)
-        background_tasks.add_task(
-            cosmosdb_service.save_conversation, 
-            user_id, 
-            updated_history
-        )
+        if cosmosdb_service:
+            background_tasks.add_task(
+                cosmosdb_service.save_conversation, 
+                user_id, 
+                updated_history
+            )
         
         logger.info(f"Successfully processed portal chat for user {user_id}")
         
@@ -228,18 +234,6 @@ async def chat_portal_endpoint(chat_message: ChatMessage, background_tasks: Back
     except Exception as e:
         logger.error(f"Error in portal chat endpoint: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
-
-@app.post("/chat/stream")
-async def chat_stream_endpoint(chat_message: ChatMessage):
-    """Stream agent response tokens for real-time UX."""
-    async def token_generator():
-        async for token in ai_agent_service.stream_agent_response(
-            agent_name="portal_claim_agent",  # or make this dynamic
-            user_id=chat_message.user_id,
-            user_message=chat_message.message
-        ):
-            yield token
-    return StreamingResponse(token_generator(), media_type="text/plain")
 
 @app.get("/health")
 async def health_check():
@@ -258,17 +252,91 @@ async def agents_status():
     
     return {
         "initialized_agents": list(ai_agent_service.agent_ids.keys()),
-        "active_threads": len(ai_agent_service.threads),
         "available_templates": poml_service.list_templates() if poml_service else []
     }
+
+@app.get("/chat/{user_id}/thread_status")
+async def get_thread_status(user_id: str):
+    """
+    Get the current thread status for a user.
+    """
+    if not ai_agent_service:
+        raise HTTPException(status_code=503, detail="AI service not available")
+    
+    try:
+        thread_id = await ai_agent_service.get_thread_status(user_id)
+        return {
+            "user_id": user_id,
+            "thread_id": thread_id,
+            "has_active_thread": thread_id is not None
+        }
+    except Exception as e:
+        logger.error(f"Error getting thread status for user {user_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get thread status")
+    
+@app.post("/chat/{user_id}/clear_claim_cache")
+async def clear_claim_cache(user_id: str):
+    """
+    Clear the claim cache for a specific user.
+    """
+    if not redis_service:
+        raise HTTPException(status_code=503, detail="Redis service not available")
+    
+    try:
+        await redis_service.clear_claim_info(user_id)
+        return {"message": f"Claim cache for user {user_id} cleared."}
+    except Exception as e:
+        logger.error(f"Error clearing claim cache for user {user_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to clear claim cache")
 
 @app.delete("/chat/{user_id}/history")
 async def clear_chat_history(user_id: str):
     """
     Clear chat history for a specific user.
     """
+    if not redis_service:
+        raise HTTPException(status_code=503, detail="Redis service not available")
     await redis_service.redis.delete(f"chat_history:{user_id}")
     return {"message": f"Chat history for user {user_id} cleared."}
+
+@app.post("/chat/{user_id}/clear_thread")
+async def clear_chat_thread(user_id: str):
+    """
+    Clear the chat thread and cancel any active runs for a specific user.
+    """
+    if not ai_agent_service:
+        raise HTTPException(status_code=503, detail="AI service not available")
+    
+    try:
+        await ai_agent_service.clear_thread_and_runs(user_id)
+        # Also clear Redis chat history for a fresh start
+        if redis_service:
+            await redis_service.clear_chat_history(user_id)
+        return {"message": f"Chat thread, runs, and history for user {user_id} cleared."}
+    except Exception as e:
+        logger.error(f"Error clearing thread for user {user_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to clear thread")
+
+@app.post("/chat/{user_id}/force_new_thread")
+async def force_new_chat_thread(user_id: str):
+    """
+    Force create a new thread for a user, clearing any existing one.
+    """
+    if not ai_agent_service:
+        raise HTTPException(status_code=503, detail="AI service not available")
+    
+    try:
+        thread_id = await ai_agent_service.force_new_thread(user_id)
+        # Also clear Redis chat history for a fresh start
+        if redis_service:
+            await redis_service.clear_chat_history(user_id)
+        return {
+            "message": f"New thread created for user {user_id}",
+            "thread_id": thread_id
+        }
+    except Exception as e:
+        logger.error(f"Error creating new thread for user {user_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to create new thread")
 
 app.add_middleware(
     CORSMiddleware,
@@ -279,5 +347,4 @@ app.add_middleware(
 )
 
 if __name__ == '__main__':
-    import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -2,7 +2,7 @@ import redis.asyncio as redis
 import json
 import logging
 from typing import Optional, Any
-from config import settings
+from ..config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +72,28 @@ class RedisService:
             logger.info(f"Cleared chat history for user {user_id}")
         except Exception as e:
             logger.error(f"Error clearing chat history for user {user_id}: {e}")
+    
+    async def save_claim_info(self, user_id: str, claim_info: dict):
+        """Save claim information to Redis."""
+        try:
+            claim_key = f"claim_info:{user_id}"
+            await self.redis.set(claim_key, json.dumps(claim_info))
+            logger.info(f"Saved claim info for user {user_id}")
+        except Exception as e:
+            logger.error(f"Error saving claim info for user {user_id}: {str(e)}")
+
+    async def get_claim_info(self, user_id: str) -> Optional[dict]:
+        """Get claim information from Redis."""
+        try:
+            claim_key = f"claim_info:{user_id}"
+            claim_data = await self.redis.get(claim_key)
+            if claim_data:
+                logger.info(f"Retrieved claim info from Redis for user {user_id}")
+                return json.loads(claim_data)
+            return None
+        except Exception as e:
+            logger.error(f"Error getting claim info for user {user_id}: {str(e)}")
+            return None
     
     async def cleanup_old_history(self, user_id: str, keep_messages: Optional[int] = None):
         """Clean up old history, keeping only recent messages."""
