@@ -85,9 +85,38 @@ class AIAgentService:
             self.agent_ids["portal_claim_agent"] = settings.PORTAL_AGENT_ID
             logger.info("Loaded portal_claim_agent ID.")
 
-    async def create_or_get_agent(self, agent_name: str, instructions: str = "", model: Optional[str] = None) -> str:
+    async def create_or_get_agent(self, agent_name: str, agent_id: Optional[str] = None) -> str:
+        """
+        Get an existing pre-deployed agent by ID.
+        Since agents are deployed with prompts embedded, we no longer create agents at runtime.
+        
+        Args:
+            agent_name: Name identifier for the agent
+            agent_id: Pre-deployed agent ID from environment variables
+            
+        Returns:
+            The agent ID
+            
+        Raises:
+            ValueError: If no agent ID is provided or found
+        """
         try:
-            if agent_name in self.agent_ids:
+            # If agent_id is provided, use it directly
+            if agent_id:
+                self.agent_ids[agent_name] = agent_id
+                logger.info(f"Using provided agent ID for: {agent_name}")
+                try:
+                    agent = await asyncio.to_thread(
+                        self.agents_client.get_agent,
+                        agent_id=agent_id
+                    )
+                    logger.info(f"Agent {agent_name} loaded successfully")
+                    logger.info(f"Agent {agent_name} has tools: {getattr(agent, 'tools', 'None')}")
+                    logger.info(f"Agent {agent_name} model: {getattr(agent, 'model', 'None')}")
+                except Exception as e:
+                    logger.warning(f"Could not retrieve agent details: {e}")
+                return agent_id
+            elif agent_name in self.agent_ids:
                 logger.info(f"Using configured agent ID for: {agent_name}")
                 # Log the agent details to see what it has
                 try:
@@ -95,31 +124,18 @@ class AIAgentService:
                         self.agents_client.get_agent,
                         agent_id=self.agent_ids[agent_name]
                     )
-                    logger.info(f"Agent {agent_name} has instructions: {getattr(agent, 'instructions', 'None')[:200]}...")
+                    logger.info(f"Agent {agent_name} loaded successfully")
                     logger.info(f"Agent {agent_name} has tools: {getattr(agent, 'tools', 'None')}")
                     logger.info(f"Agent {agent_name} model: {getattr(agent, 'model', 'None')}")
                 except Exception as e:
                     logger.warning(f"Could not retrieve agent details: {e}")
                 return self.agent_ids[agent_name]
             else:
-                # Create the agent if not configured
-                resolved_model = model or self.deployment_model_name
-                if not resolved_model:
-                    raise ValueError("Model deployment name is required to create agent")
-                logger.info(f"Creating agent '{agent_name}' with model '{resolved_model}'")
-                logger.info(f"Creating agent with instructions: {instructions[:200]}...")
-                
-                # Create agent with function tools
-                agent = await asyncio.to_thread(
-                    self.agents_client.create_agent,
-                    name=agent_name,
-                    instructions=instructions or "",
-                    model=resolved_model,
-                    tools=self.function_tools.definitions  # Add function tool definitions
+                # Agents must be pre-deployed - no runtime creation
+                raise ValueError(
+                    f"Agent '{agent_name}' not found. Please ensure the agent is deployed "
+                    f"using deploy_agents.py and the agent ID is set in environment variables."
                 )
-                self.agent_ids[agent_name] = agent.id
-                logger.info(f"Created agent '{agent_name}' with ID {agent.id}")
-                return agent.id
         except Exception as e:
             logger.error(f"Error in create_or_get_agent for {agent_name}: {str(e)}")
             raise
