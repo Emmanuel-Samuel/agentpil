@@ -1,347 +1,576 @@
 import asyncio
+import json
 import logging
-import sys
-from pathlib import Path
-from contextlib import asynccontextmanager
-import uvicorn
-from fastapi import FastAPI, BackgroundTasks, HTTPException
-from pydantic import BaseModel
-from typing import Optional
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
-
-
-from .config import settings
-from .services.redis_service import RedisService
-from .services.cosmosdb_service import CosmosDBService
-from .services.ai_agent_service import AIAgentService
-
-from .services import tools as tools_service
-
-# Set up logging
-logging.basicConfig(
-    level=getattr(logging, settings.LOG_LEVEL.upper()),
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+import hashlib
+from typing import Dict, Optional, Any, List
+from concurrent.futures import ThreadPoolExecutor
+from azure.ai.agents import AgentsClient
+from azure.ai.agents.models import (
+    AsyncFunctionTool,
+    AsyncToolSet,
+    RequiredFunctionToolCall,
+    SubmitToolOutputsAction,
+    ToolOutput,
+    MessageDeltaChunk,
+    AgentStreamEvent,
 )
-# Reduce Azure SDK HTTP logging verbosity
-logging.getLogger('azure.core.pipeline.policies.http_logging_policy').setLevel(logging.WARNING)
+from azure.identity import DefaultAzureCredential
+from ..config import settings
+import httpx
+from . import tools as tools_service
+
 logger = logging.getLogger(__name__)
 
-# Global service instances
-redis_service: Optional[RedisService] = None
-cosmosdb_service: Optional[CosmosDBService] = None
-ai_agent_service: Optional[AIAgentService] = None
+# Shared executor for running blocking SDK calls without blocking the event loop
+_EXECUTOR = ThreadPoolExecutor(max_workers=10)
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Manage application lifespan events."""
-    global redis_service, cosmosdb_service, ai_agent_service
-    
-    try:
-        # Initialize services
-        logger.info("Initializing services...")
-        
-        logger.info("Initializing RedisService...")
-        redis_service = RedisService()
-        logger.info("RedisService initialized.")
-        
-        logger.info("Initializing CosmosDBService...")
-        if settings.COSMOS_DB_URL and settings.COSMOS_DB_KEY and settings.COSMOS_DB_DATABASE_NAME and settings.COSMOS_DB_CONTAINER_NAME:
-            cosmosdb_service = CosmosDBService(
-                url=settings.COSMOS_DB_URL,
-                key=settings.COSMOS_DB_KEY,
-                database_name=settings.COSMOS_DB_DATABASE_NAME,
-                container_name=settings.COSMOS_DB_CONTAINER_NAME
+def _hash_key(*parts: str) -> str:
+    h = hashlib.sha256()
+    for p in parts:
+        h.update(p.encode('utf-8'))
+    return h.hexdigest()
+
+class AIAgentService:
+    """Service for managing AI agents using Azure AI Foundry."""
+    def __init__(self, redis_client=None):
+        try:
+            self.credential = DefaultAzureCredential()
+            self.agents_client = AgentsClient(
+                endpoint=settings.AZURE_AI_FOUNDRY_ENDPOINT,
+                credential=self.credential
             )
-            await cosmosdb_service.initialize()
-        else:
-            logger.warning("CosmosDB credentials not found, skipping initialization.")
-        
-        logger.info("Initializing tools service...")
-        tools_service.initialize_tools(cosmosdb_service)
-        logger.info("Tools service initialized.")
-        
-        logger.info("Initializing AIAgentService...")
-        if redis_service:
-            ai_agent_service = AIAgentService(redis_client=redis_service.redis)
-            logger.info("AIAgentService initialized.")
-        else:
-            logger.warning("Redis service not available, skipping AIAgentService initialization.")
-        
-        # Initialize AI agents using pre-deployed agent IDs
-        logger.info("Initializing agents...")
-        await initialize_agents()
-        logger.info("Agents initialized.")
-        
-        logger.info("Application startup complete")
-        yield
-        
-    except Exception as e:
-        logger.error(f"Error during startup: {str(e)}")
-        raise
-    finally:
-        # Cleanup
-        logger.info("Application shutdown - cleaning up services...")
-        if ai_agent_service:
-            ai_agent_service.close()
+            # Shared executor for blocking SDK calls
+            self.executor = _EXECUTOR
+            self.agent_ids: Dict[str, str] = {}
+            self.threads: Dict[str, str] = {}
+            self.deployment_model_name = settings.AZURE_AI_FOUNDRY_DEPLOYMENT_MODEL_NAME
+            self.redis = redis_client
+            self._initialize_callable_tools()
+            self._load_agent_ids()
+            logger.info("AIAgentService initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize AIAgentService: {str(e)}")
+            raise
 
-async def initialize_agents():
-    """Initialize AI agents using pre-deployed agent IDs."""
-    if not ai_agent_service:
-        logger.warning("Skipping agent initialization due to missing AI agent service.")
-        return
-    try:
-        # Initialize agents using pre-deployed agent IDs from environment
-        # Agents must be deployed first using deploy_agents.py
-        if settings.INITIAL_INTAKE_AGENT_ID:
-            await ai_agent_service.create_or_get_agent(
-                agent_name="initial_intake_agent",
-                agent_id=settings.INITIAL_INTAKE_AGENT_ID
-            )
-            logger.info("Initialized initial_intake_agent using pre-deployed agent ID")
-        else:
-            logger.error("INITIAL_INTAKE_AGENT_ID not found in environment variables. Please run deploy_agents.py first.")
+    def _initialize_callable_tools(self):
+        """Initialize function tools for agent integration"""
+        # Define the tool functions that will be available to the agent (metadata functions)
+        self.tool_functions = [
+            tools_service.get_claim_by_contact_info,
+            tools_service.initiate_new_claim,
+            tools_service.transition_claim_type,
+            tools_service.update_claim_data,
+        ]
         
-        if settings.PORTAL_AGENT_ID:
-            await ai_agent_service.create_or_get_agent(
-                agent_name="portal_claim_agent",
-                agent_id=settings.PORTAL_AGENT_ID
-            )
-            logger.info("Initialized portal_claim_agent using pre-deployed agent ID")
-        else:
-            logger.error("PORTAL_AGENT_ID not found in environment variables. Please run deploy_agents.py first.")
+        # Create FunctionTool definitions for the agent
+        self.function_tools = AsyncFunctionTool(functions=self.tool_functions)
         
-    except Exception as e:
-        logger.error(f"Error initializing agents: {str(e)}")
-        raise
-
-# Create FastAPI app with lifespan management
-app = FastAPI(
-    title="AI Chatbot for Law Firm",
-    description="A sophisticated AI chatbot system for personal injury law firm",
-    version="1.0.0",
-    lifespan=lifespan
-)
-
-# Pydantic models
-class ChatMessage(BaseModel):
-    user_id: str
-    message: str
-
-class ChatResponse(BaseModel):
-    response: str
-    history: list
-
-@app.post("/chat/initial", response_model=ChatResponse)
-async def chat_initial_endpoint(chat_message: ChatMessage, background_tasks: BackgroundTasks):
-    """Handle initial intake agent conversations."""
-    if not redis_service or not ai_agent_service:
-        raise HTTPException(status_code=503, detail="Services not available")
-    try:
-        user_id = chat_message.user_id
-        user_message = chat_message.message
+        # Initialize AsyncToolSet with the function tools
+        self.toolset = AsyncToolSet()
+        self.toolset.add(self.function_tools)
         
-        logger.info(f"Initial chat request from user {user_id}: {user_message}")
-        
-        # Get conversation history from Redis
-        history = await redis_service.get_chat_history(user_id)
-        
-        # Get response from Initial Intake Agent using the new method
-        ai_response_content = await ai_agent_service.get_agent_response(
-            agent_name="initial_intake_agent",
-            user_id=user_id,
-            user_message=user_message,
-            chat_history=history
-        )
-        
-        # Add messages to Redis history (short-term)
-        await redis_service.add_message_to_history(user_id, {"role": "user", "content": user_message})
-        await redis_service.add_message_to_history(user_id, {"role": "assistant", "content": ai_response_content})
-        
-        # Get updated history for response
-        updated_history = await redis_service.get_chat_history(user_id)
-        
-        # Save to Cosmos DB in background (long-term)
-        if cosmosdb_service:
-            background_tasks.add_task(
-                cosmosdb_service.save_conversation, 
-                user_id, 
-                updated_history
-            )
-        
-        logger.info(f"Successfully processed initial chat for user {user_id}")
-        
-        return ChatResponse(
-            response=ai_response_content,
-            history=updated_history
-        )
-        
-    except Exception as e:
-        logger.error(f"Error in initial chat endpoint: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-@app.post("/chat/portal", response_model=ChatResponse)
-async def chat_portal_endpoint(chat_message: ChatMessage, background_tasks: BackgroundTasks):
-    """Handle portal agent conversations for authenticated users."""
-    if not redis_service or not ai_agent_service:
-        raise HTTPException(status_code=503, detail="Services not available")
-    try:
-        user_id = chat_message.user_id
-        user_message = chat_message.message
-        
-        logger.info(f"Portal chat request from user {user_id}: {user_message}")
-        
-        # Get conversation history from Redis
-        history = await redis_service.get_chat_history(user_id)
-        
-        # Get response from Portal Claim Agent using the Azure-style method
-        ai_response_content = await ai_agent_service.get_agent_response(
-            agent_name="portal_claim_agent",
-            user_id=user_id,
-            user_message=user_message,
-            chat_history=history
-        )
-        
-        # Add messages to Redis history (short-term)
-        await redis_service.add_message_to_history(user_id, {"role": "user", "content": user_message})
-        await redis_service.add_message_to_history(user_id, {"role": "assistant", "content": ai_response_content})
-        
-        # Get updated history for response
-        updated_history = await redis_service.get_chat_history(user_id)
-        
-        # Save to Cosmos DB in background (long-term)
-        if cosmosdb_service:
-            background_tasks.add_task(
-                cosmosdb_service.save_conversation, 
-                user_id, 
-                updated_history
-            )
-        
-        logger.info(f"Successfully processed portal chat for user {user_id}")
-        
-        return ChatResponse(
-            response=ai_response_content,
-            history=updated_history
-        )
-        
-    except Exception as e:
-        logger.error(f"Error in portal chat endpoint: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-@app.get("/health")
-async def health_check():
-    """Health check endpoint."""
-    return {
-        "status": "healthy",
-        "environment": settings.ENVIRONMENT,
-        "agents_initialized": len(ai_agent_service.agent_ids) if ai_agent_service else 0
-    }
-
-@app.get("/agents/status")
-async def agents_status():
-    """Get status of initialized agents."""
-    if not ai_agent_service:
-        return {"error": "AI Agent Service not initialized"}
-    
-    return {
-        "initialized_agents": list(ai_agent_service.agent_ids.keys()),
-        "agent_ids": {
-            "initial_intake_agent": settings.INITIAL_INTAKE_AGENT_ID,
-            "portal_claim_agent": settings.PORTAL_AGENT_ID
+        # Store the actual implementations for direct execution when needed
+        self.tool_implementations = {
+            "get_claim_by_contact_info": tools_service.get_claim_by_contact_info,
+            "initiate_new_claim": tools_service.initiate_new_claim,
+            "transition_claim_type": tools_service.transition_claim_type,
+            "update_claim_data": tools_service.update_claim_data,
         }
-    }
 
-@app.get("/chat/{user_id}/thread_status")
-async def get_thread_status(user_id: str):
-    """
-    Get the current thread status for a user.
-    """
-    if not ai_agent_service:
-        raise HTTPException(status_code=503, detail="AI service not available")
+    def _load_agent_ids(self):
+        if getattr(settings, "INITIAL_INTAKE_AGENT_ID", None):
+            self.agent_ids["initial_intake_agent"] = settings.INITIAL_INTAKE_AGENT_ID
+            logger.info("Loaded initial_intake_agent ID.")
+        if getattr(settings, "PORTAL_AGENT_ID", None):
+            self.agent_ids["portal_claim_agent"] = settings.PORTAL_AGENT_ID
+            logger.info("Loaded portal_claim_agent ID.")
+
+    async def create_or_get_agent(self, agent_name: str, agent_id: Optional[str] = None) -> str:
+        """
+        Get an existing pre-deployed agent by ID.
+        Since agents are deployed with prompts embedded, we no longer create agents at runtime.
+        
+        Args:
+            agent_name: Name identifier for the agent
+            agent_id: Pre-deployed agent ID from environment variables
+            
+        Returns:
+            The agent ID
+            
+        Raises:
+            ValueError: If no agent ID is provided or found
+        """
+        try:
+            # If agent_id is provided, use it directly
+            if agent_id:
+                self.agent_ids[agent_name] = agent_id
+                logger.info(f"Using provided agent ID for: {agent_name}")
+                try:
+                    agent = await asyncio.to_thread(
+                        self.agents_client.get_agent,
+                        agent_id=agent_id
+                    )
+                    logger.info(f"Agent {agent_name} loaded successfully")
+                    logger.info(f"Agent {agent_name} has tools: {getattr(agent, 'tools', 'None')}")
+                    logger.info(f"Agent {agent_name} model: {getattr(agent, 'model', 'None')}")
+                except Exception as e:
+                    logger.warning(f"Could not retrieve agent details: {e}")
+                return agent_id
+            elif agent_name in self.agent_ids:
+                logger.info(f"Using configured agent ID for: {agent_name}")
+                # Log the agent details to see what it has
+                try:
+                    agent = await asyncio.to_thread(
+                        self.agents_client.get_agent,
+                        agent_id=self.agent_ids[agent_name]
+                    )
+                    logger.info(f"Agent {agent_name} loaded successfully")
+                    logger.info(f"Agent {agent_name} has tools: {getattr(agent, 'tools', 'None')}")
+                    logger.info(f"Agent {agent_name} model: {getattr(agent, 'model', 'None')}")
+                except Exception as e:
+                    logger.warning(f"Could not retrieve agent details: {e}")
+                return self.agent_ids[agent_name]
+            else:
+                # Agents must be pre-deployed - no runtime creation
+                raise ValueError(
+                    f"Agent '{agent_name}' not found. Please ensure the agent is deployed "
+                    f"using deploy_agents.py and the agent ID is set in environment variables."
+                )
+        except Exception as e:
+            logger.error(f"Error in create_or_get_agent for {agent_name}: {str(e)}")
+            raise
+
+            
+    async def get_or_create_thread(self, user_id: str) -> str:
+        """Get existing thread_id from Redis or create a new one for the user."""
+        if not self.redis:
+            raise ConnectionError("Redis client is not initialized.")
+        
+        try:
+            thread_id_key = f"thread_id:{user_id}"
+            
+            # Try to get existing thread from Redis
+            thread_id_bytes = await self.redis.get(thread_id_key)
+            if thread_id_bytes:
+                thread_id = thread_id_bytes.decode() if isinstance(thread_id_bytes, bytes) else thread_id_bytes
+                
+                # Validate that the thread still exists on Azure
+                try:
+                    await asyncio.to_thread(
+                        self.agents_client.threads.get,
+                        thread_id=thread_id
+                    )
+                    
+                    # Check for active runs before reusing the thread
+                    has_active_run = await self._has_active_run(thread_id)
+                    if has_active_run:
+                        logger.warning(f"Thread {thread_id} has active runs, waiting...")
+                        # Wait a bit and check again
+                        await asyncio.sleep(2)
+                        has_active_run = await self._has_active_run(thread_id)
+                        if has_active_run:
+                            logger.error(f"Thread {thread_id} still has active runs, creating new thread")
+                            await self.redis.delete(thread_id_key)
+                            # Fall through to create new thread
+                        else:
+                            logger.info(f"Using existing thread {thread_id} for user {user_id}")
+                            return thread_id
+                    else:
+                        logger.info(f"Using existing thread {thread_id} for user {user_id}")
+                        return thread_id
+                        
+                except Exception as e:
+                    logger.warning(f"Thread {thread_id} validation failed, creating new one: {e}")
+                    # Thread doesn't exist anymore, delete from cache and create new
+                    await self.redis.delete(thread_id_key)
+            
+            # Create new thread
+            thread = await asyncio.to_thread(self.agents_client.threads.create)
+            
+            # Store in Redis with TTL (optional - adjust TTL as needed)
+            ttl_seconds = 24 * 60 * 60  # 24 hours
+            await self.redis.setex(thread_id_key, ttl_seconds, thread.id)
+            
+            logger.info(f"Created new thread {thread.id} for user {user_id} and saved to Redis")
+            return thread.id
+            
+        except Exception as e:
+            logger.error(f"Error getting/creating thread for user {user_id}: {str(e)}")
+            raise    
+        
+        # """Create a new thread for the user."""
+        # try:
+        #     thread = await asyncio.to_thread(self.agents_client.threads.create)
+        #     logger.info(f"Created new thread {thread.id} for user {user_id}")
+        #     return thread.id
+        # except Exception as e:
+        #     logger.error(f"Error creating thread for user {user_id}: {str(e)}")
+        #     raise
+
+    async def get_agent_response(
+        self,
+        agent_name: str,
+        user_id: str,
+        user_message: str,
+        chat_history: Optional[List[Dict]] = None
+    ) -> str:
+        """
+        Get a response from the agent using thread reuse for conversation context.
+        Simplified approach based on working reference.
+        """
+        logger.info(f"get_agent_response called with agent_name={agent_name}, user_id={user_id}")
+        try:
+            agent_id = await self.create_or_get_agent(agent_name)
+            
+            # Get or create thread ID from cache
+            thread_id_key = f"thread_id:{user_id}"
+            thread_id = None
+            
+            if self.redis:
+                thread_id_bytes = await self.redis.get(thread_id_key)
+                if thread_id_bytes:
+                    thread_id = thread_id_bytes.decode() if isinstance(thread_id_bytes, bytes) else thread_id_bytes
+                    logger.info(f"Using existing thread {thread_id} for user {user_id}")
+            
+            if not thread_id:
+                logger.info(f"No existing thread found, creating a new one for user {user_id}")
+                
+                # Prepare initial messages including chat history and current message
+                initial_messages = []
+                if chat_history:
+                    # Add historical messages (excluding system messages)
+                    for msg in chat_history:
+                        if msg.get("role") in ["user", "assistant"]:
+                            initial_messages.append({
+                                "role": msg["role"],
+                                "content": msg["content"]
+                            })
+                
+                # Add the current user message
+                initial_messages.append({"role": "user", "content": user_message})
+                
+                # Create thread with initial messages using synchronous call wrapped in executor
+                def create_thread_with_messages():
+                    return self.agents_client.threads.create(messages=initial_messages)
+                
+                new_thread = await asyncio.to_thread(create_thread_with_messages)
+                thread_id = new_thread.id
+                
+                # Cache the thread ID
+                if self.redis:
+                    ttl_seconds = 24 * 60 * 60  # 24 hours
+                    await self.redis.setex(thread_id_key, ttl_seconds, thread_id)
+                
+                logger.info(f"Created new thread {thread_id} for user {user_id} and saved to Redis")
+            else:
+                # Add the new user message to the existing thread
+                try:
+                    def add_message_to_thread():
+                        return self.agents_client.messages.create(
+                            thread_id=thread_id,
+                            content=user_message,
+                            role="user"
+                        )
+                    
+                    await asyncio.to_thread(add_message_to_thread)
+                    logger.info(f"Added user message to existing thread {thread_id}")
+                except Exception as e:
+                    logger.error(f"Error adding message to thread {thread_id}: {e}")
+                    return "I'm sorry, I couldn't add your message to the conversation. Please try again."
+            
+            logger.info(f"Sending request to agent {agent_name} for thread {thread_id}")
+            
+            try:
+                # Create and run the agent using synchronous calls
+                def create_and_run():
+                    return self.agents_client.runs.create(
+                        thread_id=thread_id,
+                        agent_id=agent_id
+                    )
+                
+                run = await asyncio.to_thread(create_and_run)
+                run_id = run.id
+                logger.info(f"Created run {run_id} for thread {thread_id}")
+                
+                # Poll the run until completion
+                max_wait_time = 60  # 60 seconds timeout
+                start_time = asyncio.get_event_loop().time()
+                
+                while True:
+                    if asyncio.get_event_loop().time() - start_time > max_wait_time:
+                        logger.error(f"Run {run_id} processing timed out after {max_wait_time} seconds")
+                        return "I'm sorry, the request took too long to process. Please try again."
+                    
+                    def get_run_status():
+                        return self.agents_client.runs.get(thread_id=thread_id, run_id=run_id)
+                    
+                    run = await asyncio.to_thread(get_run_status)
+                    status_obj = getattr(run, "status", "")
+                    status_str = str(status_obj)
+                    if "." in status_str:
+                        status_str = status_str.split(".")[-1]
+                    status = status_str.strip().lower()
+                    
+                    logger.info(f"Run {run_id} status: {status}")
+                    
+                    if status == "requires_action":
+                        required_action = getattr(run, "required_action", None)
+                        if required_action and hasattr(required_action, "submit_tool_outputs"):
+                            tool_calls = required_action.submit_tool_outputs.tool_calls
+                            if not tool_calls:
+                                logger.warning("No tool calls provided - cancelling run")
+                                break
+                            
+                            # Execute tool calls
+                            tool_outputs = await self.toolset.execute_tool_calls(tool_calls)
+                            logger.info(f"Tool outputs: {tool_outputs}")
+                            
+                            if tool_outputs:
+                                def submit_tool_outputs():
+                                    return self.agents_client.runs.submit_tool_outputs(
+                                        thread_id=thread_id,
+                                        run_id=run_id,
+                                        tool_outputs=tool_outputs
+                                    )
+                                
+                                await asyncio.to_thread(submit_tool_outputs)
+                                logger.info(f"Submitted tool outputs for run {run_id}")
+                    elif status in {"completed", "failed", "cancelled"}:
+                        logger.info(f"Run {run_id} reached terminal status: {status}")
+                        break
+                    
+                    # Wait before next poll
+                    await asyncio.sleep(1)
+                
+                if status == "failed":
+                    error_info = getattr(run, "last_error", "Unknown error")
+                    logger.error(f"Run {run_id} failed: {error_info}")
+                    return "I'm sorry, I encountered an error processing your request."
+                
+                # Get the latest messages from the thread
+                def get_messages():
+                    return list(self.agents_client.messages.list(thread_id=thread_id, limit=5))
+                
+                messages = await asyncio.to_thread(get_messages)
+                logger.info(f"Retrieved {len(messages)} messages from thread {thread_id}")
+                
+                # Find the most recent assistant message
+                for message in messages:
+                    if getattr(message, "role", None) == "assistant":
+                        content_items = getattr(message, 'content', [])
+                        for content_item in content_items:
+                            if hasattr(content_item, 'text') and hasattr(content_item.text, 'value'):
+                                response_text = content_item.text.value
+                                if response_text and response_text.strip():
+                                    logger.info(f"Agent {agent_name} responded to user {user_id} with: {response_text[:200]}...")
+                                    return response_text
+                
+                logger.warning(f"No assistant message found in completed run {run_id}")
+                return "I'm sorry, I couldn't process your request at this time."
+                
+            except Exception as e:
+                logger.error(f"Error in agent execution: {e}", exc_info=True)
+                return "I apologize, but I encountered an error. Please try again."
+                
+        except Exception as e:
+            logger.error(f"Error getting agent response: {str(e)}", exc_info=True)
+            return "I'm sorry, I encountered an error. Please try again."
+            
+    # async def get_agent_response(
+    #     self,
+    #     agent_name: str,
+    #     user_id: str,
+    #     user_message: str,
+    #     chat_history: Optional[List[Dict]] = None
+    # ) -> str:
+    #     """
+    #     Get a response from the agent using a single API call.
+    #     """
+    #     logger.info(f"get_agent_response_single_call called with agent_name={agent_name}, user_id={user_id}, user_message={user_message}")
+    #     try:
+    #         agent_id = await self.create_or_get_agent(agent_name)
+    #         thread_id = await self.get_or_create_thread(user_id)
+            
+    #         # Add the user message to the thread
+    #         await asyncio.to_thread(
+    #             self.agents_client.messages.create,
+    #             thread_id=thread_id,
+    #             role="user",
+    #             content=user_message
+    #         )
+            
+    #         # Create a run
+    #         run = await asyncio.to_thread(
+    #             self.agents_client.runs.create,
+    #             thread_id=thread_id,
+    #             agent_id=agent_id
+    #         )
+            
+    #         # Poll the run as long as run status is queued or in progress
+    #         while run.status in {"queued", "in_progress", "requires_action"}:
+    #             await asyncio.sleep(1)
+    #             run = await asyncio.to_thread(
+    #                 self.agents_client.runs.get,
+    #                 thread_id=thread_id,
+    #                 run_id=run.id
+    #             )
+    #             logger.info(f"Run status: {run.status}")
+                
+    #             if run.status == "requires_action":
+    #                 required_action = getattr(run, "required_action", None)
+    #                 if required_action and hasattr(required_action, "submit_tool_outputs"):
+    #                     tool_calls = required_action.submit_tool_outputs.tool_calls
+    #                     if not tool_calls:
+    #                         logger.warning("No tool calls provided - cancelling run")
+    #                         await asyncio.to_thread(
+    #                             self.agents_client.runs.cancel,
+    #                             thread_id=thread_id,
+    #                             run_id=run.id
+    #                         )
+    #                         break
+                        
+    #                     # Use the AsyncToolSet to execute tool calls
+    #                     tool_outputs = await self.toolset.execute_tool_calls(tool_calls)
+    #                     logger.info(f"Tool outputs: {tool_outputs}")
+                        
+    #                     if tool_outputs:
+    #                         await asyncio.to_thread(
+    #                             self.agents_client.runs.submit_tool_outputs,
+    #                             thread_id=thread_id,
+    #                             run_id=run.id,
+    #                             tool_outputs=tool_outputs
+    #                         )
+            
+    #         if run.status == "failed":
+    #             logger.error(f"Run error: {run.last_error}")
+    #             return "I'm sorry, I encountered an error processing your request."
+            
+    #         # Get the messages from the thread
+    #         messages = await asyncio.to_thread(
+    #             lambda: list(self.agents_client.messages.list(thread_id=thread_id))
+    #         )
+            
+    #         # Find the last assistant message
+    #         for message in reversed(messages):
+    #             if getattr(message, "role", None) == "assistant":
+    #                 response_text = next((c.text.value for c in message.content if hasattr(c, 'text')), None)
+    #                 if response_text:
+    #                     logger.info(f"Agent {agent_name} responded to user {user_id} with: {response_text}")
+    #                     return response_text
+            
+    #         logger.warning(f"No assistant message found in completed run {run.id}")
+    #         return "I'm sorry, I couldn't process your request at this time."
+            
+    #     except Exception as e:
+    #         logger.error(f"Error getting agent response: {str(e)}", exc_info=True)
+    #         return "I'm sorry, I encountered an error. Please try again."
     
-    try:
-        thread_id = await ai_agent_service.get_thread_status(user_id)
-        return {
-            "user_id": user_id,
-            "thread_id": thread_id,
-            "has_active_thread": thread_id is not None
-        }
-    except Exception as e:
-        logger.error(f"Error getting thread status for user {user_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to get thread status")
-    
-@app.post("/chat/{user_id}/clear_claim_cache")
-async def clear_claim_cache(user_id: str):
-    """
-    Clear the claim cache for a specific user.
-    """
-    if not redis_service:
-        raise HTTPException(status_code=503, detail="Redis service not available")
-    
-    try:
-        # Clear claim info from Redis cache
-        await redis_service.redis.delete(f"claim_info:{user_id}")
-        return {"message": f"Claim cache for user {user_id} cleared."}
-    except Exception as e:
-        logger.error(f"Error clearing claim cache for user {user_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to clear claim cache")
+  
+    def close(self):
+        try:
+            self.credential.close()
+            logger.info("AIAgentService credentials closed")
+        except Exception as e:
+            logger.error(f"Error closing credentials: {str(e)}")
 
-@app.delete("/chat/{user_id}/history")
-async def clear_chat_history(user_id: str):
-    """
-    Clear chat history for a specific user.
-    """
-    if not redis_service:
-        raise HTTPException(status_code=503, detail="Redis service not available")
-    await redis_service.redis.delete(f"chat_history:{user_id}")
-    return {"message": f"Chat history for user {user_id} cleared."}
+    # Shared async HTTP client for all external HTTP calls
+    _shared_async_client: httpx.AsyncClient = httpx.AsyncClient(limits=httpx.Limits(max_keepalive_connections=5, max_connections=10))
 
-@app.post("/chat/{user_id}/clear_thread")
-async def clear_chat_thread(user_id: str):
-    """
-    Clear the chat thread and cancel any active runs for a specific user.
-    """
-    if not ai_agent_service:
-        raise HTTPException(status_code=503, detail="AI service not available")
-    
-    try:
-        await ai_agent_service.clear_thread(user_id)
-        # Also clear Redis chat history for a fresh start
-        if redis_service:
-            await redis_service.redis.delete(f"chat_history:{user_id}")
-        return {"message": f"Chat thread, runs, and history for user {user_id} cleared."}
-    except Exception as e:
-        logger.error(f"Error clearing thread for user {user_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to clear thread")
+    @classmethod
+    async def close_shared_client(cls):
+        await cls._shared_async_client.aclose()
 
-@app.post("/chat/{user_id}/force_new_thread")
-async def force_new_chat_thread(user_id: str):
-    """
-    Force create a new thread for a user, clearing any existing one.
-    """
-    if not ai_agent_service:
-        raise HTTPException(status_code=503, detail="AI service not available")
-    
-    try:
-        thread_id = await ai_agent_service.force_new_thread(user_id)
-        # Also clear Redis chat history for a fresh start
-        if redis_service:
-            await redis_service.redis.delete(f"chat_history:{user_id}")
-        return {
-            "message": f"New thread created for user {user_id}",
-            "thread_id": thread_id
-        }
-    except Exception as e:
-        logger.error(f"Error creating new thread for user {user_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to create new thread")
+    async def _has_active_run(self, thread_id: str) -> bool:
+        """Check if there is an active run for a thread to prevent overlapping runs."""
+        try:
+            runs = await asyncio.to_thread(lambda: list(self.agents_client.runs.list(thread_id=thread_id)))
+            for run in runs:
+                status_obj = getattr(run, "status", "")
+                status_str = str(status_obj)
+                # Normalize enum-like values such as 'RunStatus.completed' or 'runstatus.completed'
+                if "." in status_str:
+                    status_str = status_str.split(".")[-1]
+                status = status_str.strip().lower()
+                if status in {"queued", "in_progress", "requires_action"}:
+                    logger.info(f"Found active run {run.id} with status {status} for thread {thread_id}")
+                    return True
+            return False
+        except Exception as e:
+            logger.warning(f"Failed to list runs for thread {thread_id}: {e}")
+            return False
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Add your frontend URL
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+    async def clear_thread(self, user_id: str):
+        """Clear the thread for a specific user."""
+        if not self.redis:
+            logger.warning("Redis not available for thread cleanup")
+            return
+        
+        try:
+            thread_id_key = f"thread_id:{user_id}"
+            thread_id_bytes = await self.redis.get(thread_id_key)
+            
+            if thread_id_bytes:
+                thread_id = thread_id_bytes.decode() if isinstance(thread_id_bytes, bytes) else thread_id_bytes
+                logger.info(f"Clearing thread {thread_id} for user {user_id}")
+                
+                # Try to cancel any active runs before clearing
+                try:
+                    def list_and_cancel_runs():
+                        runs = list(self.agents_client.runs.list(thread_id=thread_id))
+                        for run in runs:
+                            status_obj = getattr(run, "status", "")
+                            status_str = str(status_obj)
+                            if "." in status_str:
+                                status_str = status_str.split(".")[-1]
+                            status = status_str.strip().lower()
+                            
+                            if status in {"queued", "in_progress", "requires_action"}:
+                                logger.info(f"Cancelling active run {run.id}")
+                                self.agents_client.runs.cancel(thread_id=thread_id, run_id=run.id)
+                    
+                    await asyncio.to_thread(list_and_cancel_runs)
+                except Exception as cancel_error:
+                    logger.warning(f"Error cancelling runs for thread {thread_id}: {cancel_error}")
+            
+            # Remove from Redis
+            await self.redis.delete(thread_id_key)
+            logger.info(f"Cleared thread for user {user_id}")
+            
+        except Exception as e:
+            logger.error(f"Error clearing thread for user {user_id}: {str(e)}")
 
-if __name__ == '__main__':
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    async def get_thread_status(self, user_id: str) -> Optional[str]:
+        """Get the current thread ID for a user if it exists."""
+        if not self.redis:
+            return None
+        
+        try:
+            thread_id_key = f"thread_id:{user_id}"
+            thread_id_bytes = await self.redis.get(thread_id_key)
+            if thread_id_bytes:
+                return thread_id_bytes.decode() if isinstance(thread_id_bytes, bytes) else thread_id_bytes
+            return None
+        except Exception as e:
+            logger.error(f"Error getting thread status for user {user_id}: {str(e)}")
+            return None
+
+    async def force_new_thread(self, user_id: str):
+        """Force create a new thread for a user, clearing any existing one."""
+        try:
+            # Clear existing thread and runs
+            await self.clear_thread(user_id)
+            
+            # Create new thread
+            thread = await asyncio.to_thread(self.agents_client.threads.create)
+            
+            # Store in Redis
+            thread_id_key = f"thread_id:{user_id}"
+            ttl_seconds = 24 * 60 * 60  # 24 hours
+            await self.redis.setex(thread_id_key, ttl_seconds, thread.id)
+            
+            logger.info(f"Force created new thread {thread.id} for user {user_id}")
+            return thread.id
+            
+        except Exception as e:
+            logger.error(f"Error force creating thread for user {user_id}: {str(e)}")
+            raise
