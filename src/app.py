@@ -15,7 +15,7 @@ from .config import settings
 from .services.redis_service import RedisService
 from .services.cosmosdb_service import CosmosDBService
 from .services.ai_agent_service import AIAgentService
-from .services.poml_service import POMLService
+
 from .services import tools as tools_service
 
 # Set up logging
@@ -31,12 +31,11 @@ logger = logging.getLogger(__name__)
 redis_service: Optional[RedisService] = None
 cosmosdb_service: Optional[CosmosDBService] = None
 ai_agent_service: Optional[AIAgentService] = None
-poml_service: Optional[POMLService] = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan events."""
-    global redis_service, cosmosdb_service, ai_agent_service, poml_service
+    global redis_service, cosmosdb_service, ai_agent_service
     
     try:
         # Initialize services
@@ -69,14 +68,7 @@ async def lifespan(app: FastAPI):
         else:
             logger.warning("Redis service not available, skipping AIAgentService initialization.")
         
-        logger.info("Initializing POMLService...")
-        if settings.PROMPTS_DIRECTORY:
-            poml_service = POMLService(prompts_directory=settings.PROMPTS_DIRECTORY)
-            logger.info("POMLService initialized.")
-        else:
-            logger.warning("Prompts directory not found, skipping POMLService initialization.")
-        
-        # Initialize AI agents with POML templates
+        # Initialize AI agents using pre-deployed agent IDs
         logger.info("Initializing agents...")
         await initialize_agents()
         logger.info("Agents initialized.")
@@ -94,29 +86,30 @@ async def lifespan(app: FastAPI):
             ai_agent_service.close()
 
 async def initialize_agents():
-    """Initialize AI agents with their POML-defined instructions."""
-    if not poml_service or not ai_agent_service:
-        logger.warning("Skipping agent initialization due to missing services.")
+    """Initialize AI agents using pre-deployed agent IDs."""
+    if not ai_agent_service:
+        logger.warning("Skipping agent initialization due to missing AI agent service.")
         return
     try:
-        # Initialize Initial Intake Agent
-        initial_instructions = poml_service.get_agent_instructions("initial_agent")
-        if initial_instructions:
+        # Initialize agents using pre-deployed agent IDs from environment
+        # Agents must be deployed first using deploy_agents.py
+        if settings.INITIAL_INTAKE_AGENT_ID:
             await ai_agent_service.create_or_get_agent(
                 agent_name="initial_intake_agent",
-                instructions=initial_instructions
+                agent_id=settings.INITIAL_INTAKE_AGENT_ID
             )
-            logger.info("Initialized initial_intake_agent")
+            logger.info("Initialized initial_intake_agent using pre-deployed agent ID")
+        else:
+            logger.error("INITIAL_INTAKE_AGENT_ID not found in environment variables. Please run deploy_agents.py first.")
         
-        # Initialize Portal Agent (for future use)
-        portal_instructions = poml_service.get_agent_instructions("portal_agent")
-        if portal_instructions:
-            logger.info(f"Portal agent instructions loaded: {portal_instructions[:200]}...")
+        if settings.PORTAL_AGENT_ID:
             await ai_agent_service.create_or_get_agent(
-                agent_name="portal_claim_agent", 
-                instructions=portal_instructions
+                agent_name="portal_claim_agent",
+                agent_id=settings.PORTAL_AGENT_ID
             )
-            logger.info("Initialized portal_claim_agent")
+            logger.info("Initialized portal_claim_agent using pre-deployed agent ID")
+        else:
+            logger.error("PORTAL_AGENT_ID not found in environment variables. Please run deploy_agents.py first.")
         
     except Exception as e:
         logger.error(f"Error initializing agents: {str(e)}")
@@ -252,7 +245,10 @@ async def agents_status():
     
     return {
         "initialized_agents": list(ai_agent_service.agent_ids.keys()),
-        "available_templates": poml_service.list_templates() if poml_service else []
+        "agent_ids": {
+            "initial_intake_agent": settings.INITIAL_INTAKE_AGENT_ID,
+            "portal_claim_agent": settings.PORTAL_AGENT_ID
+        }
     }
 
 @app.get("/chat/{user_id}/thread_status")
@@ -283,7 +279,8 @@ async def clear_claim_cache(user_id: str):
         raise HTTPException(status_code=503, detail="Redis service not available")
     
     try:
-        await redis_service.clear_claim_info(user_id)
+        # Clear claim info from Redis cache
+        await redis_service.redis.delete(f"claim_info:{user_id}")
         return {"message": f"Claim cache for user {user_id} cleared."}
     except Exception as e:
         logger.error(f"Error clearing claim cache for user {user_id}: {str(e)}")
@@ -308,10 +305,10 @@ async def clear_chat_thread(user_id: str):
         raise HTTPException(status_code=503, detail="AI service not available")
     
     try:
-        await ai_agent_service.clear_thread_and_runs(user_id)
+        await ai_agent_service.clear_thread(user_id)
         # Also clear Redis chat history for a fresh start
         if redis_service:
-            await redis_service.clear_chat_history(user_id)
+            await redis_service.redis.delete(f"chat_history:{user_id}")
         return {"message": f"Chat thread, runs, and history for user {user_id} cleared."}
     except Exception as e:
         logger.error(f"Error clearing thread for user {user_id}: {str(e)}")
@@ -329,7 +326,7 @@ async def force_new_chat_thread(user_id: str):
         thread_id = await ai_agent_service.force_new_thread(user_id)
         # Also clear Redis chat history for a fresh start
         if redis_service:
-            await redis_service.clear_chat_history(user_id)
+            await redis_service.redis.delete(f"chat_history:{user_id}")
         return {
             "message": f"New thread created for user {user_id}",
             "thread_id": thread_id
