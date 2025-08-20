@@ -85,20 +85,19 @@ class AIAgentService:
             self.agent_ids["portal_claim_agent"] = settings.PORTAL_AGENT_ID
             logger.info("Loaded portal_claim_agent ID.")
 
-    async def create_or_get_agent(self, agent_name: str, agent_id: Optional[str] = None) -> str:
+    async def create_or_get_agent(self, agent_name: str, instructions: str = "", model: Optional[str] = None, agent_id: Optional[str] = None) -> str:
         """
         Get an existing pre-deployed agent by ID.
-        Since agents are deployed with prompts embedded, we no longer create agents at runtime.
+        Since agents are deployed with prompts embedded, we only use pre-deployed agents.
         
         Args:
             agent_name: Name identifier for the agent
+            instructions: DEPRECATED - Not used anymore as agents have embedded prompts
+            model: DEPRECATED - Not used anymore as agents are pre-deployed
             agent_id: Pre-deployed agent ID from environment variables
             
         Returns:
             The agent ID
-            
-        Raises:
-            ValueError: If no agent ID is provided or found
         """
         try:
             # If agent_id is provided, use it directly
@@ -110,7 +109,7 @@ class AIAgentService:
                         self.agents_client.get_agent,
                         agent_id=agent_id
                     )
-                    logger.info(f"Agent {agent_name} loaded successfully")
+                    logger.info(f"Agent {agent_name} loaded successfully (pre-deployed with embedded prompts)")
                     logger.info(f"Agent {agent_name} has tools: {getattr(agent, 'tools', 'None')}")
                     logger.info(f"Agent {agent_name} model: {getattr(agent, 'model', 'None')}")
                 except Exception as e:
@@ -124,7 +123,7 @@ class AIAgentService:
                         self.agents_client.get_agent,
                         agent_id=self.agent_ids[agent_name]
                     )
-                    logger.info(f"Agent {agent_name} loaded successfully")
+                    logger.info(f"Agent {agent_name} loaded successfully (pre-deployed with embedded prompts)")
                     logger.info(f"Agent {agent_name} has tools: {getattr(agent, 'tools', 'None')}")
                     logger.info(f"Agent {agent_name} model: {getattr(agent, 'model', 'None')}")
                 except Exception as e:
@@ -132,9 +131,16 @@ class AIAgentService:
                 return self.agent_ids[agent_name]
             else:
                 # Agents must be pre-deployed - no runtime creation
+                # The instructions and model parameters are ignored
+                if instructions:
+                    logger.warning(f"Instructions parameter provided but ignored - agent '{agent_name}' must be pre-deployed")
+                if model:
+                    logger.warning(f"Model parameter provided but ignored - agent '{agent_name}' must be pre-deployed")
+                    
                 raise ValueError(
                     f"Agent '{agent_name}' not found. Please ensure the agent is deployed "
-                    f"using deploy_agents.py and the agent ID is set in environment variables."
+                    f"using deploy_agents.py and the agent ID is set in environment variables. "
+                    f"INITIAL_INTAKE_AGENT_ID and PORTAL_AGENT_ID must be set."
                 )
         except Exception as e:
             logger.error(f"Error in create_or_get_agent for {agent_name}: {str(e)}")
