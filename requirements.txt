@@ -13,7 +13,7 @@ pydantic==2.5.0
 pydantic-settings==2.1.0
 psycopg2-binary==2.9.9
 python-multipart==0.0.6
-
+prisma
 # Development dependencies (optional)
 pytest==7.4.3
 pytest-asyncio==0.21.1
