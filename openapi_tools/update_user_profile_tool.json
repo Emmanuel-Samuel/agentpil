@@ -1,0 +1,142 @@
+{
+  "name": "update_user_profile_tool",
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Update User Profile Tool",
+    "description": "Tool for updating user profile information. Supports both incremental (single field) and bulk (multiple fields) updates.",
+    "version": "3.0.0"
+  },
+  "servers": [
+    { "url": "https://ec202d6f0fb0.ngrok-free.app" }
+  ],
+  "auth": [],
+  "paths": {
+    "/api/users/{user_id}": {
+      "patch": {
+        "description": "Update a user's profile information with one or more fields. Only provided fields will be updated.",
+        "operationId": "update_user_profile",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "ID of the user to update"
+          }
+        ],
+        "requestBody": {
+          "description": "Fields to update. Include only the fields you want to change. All fields are optional.",
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "firstName": { 
+                    "type": "string",
+                    "description": "User's first name"
+                  },
+                  "lastName": { 
+                    "type": "string",
+                    "description": "User's last name"
+                  },
+                  "email": { 
+                    "type": "string",
+                    "format": "email",
+                    "description": "User's email address"
+                  },
+                  "phoneNumber": { 
+                    "type": "string",
+                    "description": "User's phone number"
+                  },
+                  "dateOfBirth": { 
+                    "type": "string",
+                    "format": "date",
+                    "description": "User's date of birth (YYYY-MM-DD)"
+                  },
+                  "address_street": { 
+                    "type": "string",
+                    "description": "Street address"
+                  },
+                  "address_city": { 
+                    "type": "string",
+                    "description": "City"
+                  },
+                  "address_state": { 
+                    "type": "string",
+                    "description": "State"
+                  },
+                  "address_postalCode": { 
+                    "type": "string",
+                    "description": "Postal code"
+                  },
+                  "address_country": { 
+                    "type": "string",
+                    "description": "Country"
+                  },
+                  "preferences_notificationsEnabled": { 
+                    "type": "boolean",
+                    "description": "Whether notifications are enabled"
+                  },
+                  "preferences_language": { 
+                    "type": "string",
+                    "description": "Preferred language"
+                  },
+                  "preferences_timezone": { 
+                    "type": "string",
+                    "description": "Preferred timezone"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successfully updated user profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "message": { "type": "string" },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "id": { "type": "string" },
+                        "email": { "type": "string" },
+                        "firstName": { "type": "string" },
+                        "lastName": { "type": "string" },
+                        "updatedAt": { 
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    },
+                    "updated_fields": {
+                      "type": "array",
+                      "items": { "type": "string" },
+                      "description": "List of fields that were updated"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No fields provided for update"
+          },
+          "404": {
+            "description": "User not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    }
+  }
+}

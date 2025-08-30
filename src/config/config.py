@@ -1,69 +1,53 @@
+# src/config.py
 import os
-from dotenv import load_dotenv
+from pydantic_settings import BaseSettings
+from typing import List, Optional
+from pydantic import Field
+from functools import lru_cache
 
-load_dotenv()
+class Settings(BaseSettings):
+    # Application Settings
+    environment: str = "development"
+    log_level: str = "INFO"
+    
+    # Azure AI Foundry Configuration
+    azure_ai_foundry_endpoint: str
+    azure_ai_foundry_project_name: str
+    azure_ai_foundry_api_key: str
+    azure_ai_foundry_deployment_model_name: str = "gpt-4o-mini"
+    azure_use_managed_identity: bool = False
+    
+    # Database Configuration
+    database_url: str
+    db_pool_min: int = 2
+    db_pool_max: int = 10
+    db_command_timeout: int = 60
+    db_max_inactive_lifetime: int = 300
+    
+    # API Configuration
+    api_secret_key: Optional[str] = None
+    allowed_origins: List[str] = ["http://localhost:3000", "http://localhost:8000"]
+    
+    # Azure Function App (if used)
+    azure_function_app_url: Optional[str] = None
+    
+    # Agent IDs (if using multiple agents)
+    initial_intake_agent_id: Optional[str] = None
+    main_orchestrator_agent_id: Optional[str] = None
+    claim_creation_agent_id: Optional[str] = None
+    claim_continuation_agent_id: Optional[str] = None
+    legal_knowledge_agent_id: Optional[str] = None
+    user_profile_agent_id: Optional[str] = None
+    
+    model_config = {
+        "env_file": ".env",
+        "env_file_encoding": "utf-8",
+        "extra": "ignore"
+    }
 
-class Settings:
-    COSMOS_DB_DATABASE_NAME = os.getenv("COSMOS_DB_DATABASE_NAME")
-    COSMOS_DB_CONTAINER_NAME = os.getenv("COSMOS_DB_CONTAINER_NAME")
-    COSMOS_DB_URL = os.getenv("COSMOS_DB_URL")
-    COSMOS_DB_KEY = os.getenv("COSMOS_DB_KEY")
-    
-    REDIS_HOST = os.getenv("REDIS_HOST")
-    REDIS_PORT = int(os.getenv("REDIS_PORT", "6380"))
-    REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
-    REDIS_USE_SSL = os.getenv("REDIS_USE_SSL", "true").lower() == "true"
-    
-    # Redis caching settings
-    REDIS_HISTORY_TTL_HOURS = int(os.getenv("REDIS_HISTORY_TTL_HOURS", "24"))
-    REDIS_MAX_HISTORY_LENGTH = int(os.getenv("REDIS_MAX_HISTORY_LENGTH", "10"))
-    
-    AZURE_AI_FOUNDRY_ENDPOINT = os.getenv("AZURE_AI_FOUNDRY_ENDPOINT")
-    AZURE_AI_FOUNDRY_DEPLOYMENT_MODEL_NAME = os.getenv("AZURE_AI_FOUNDRY_DEPLOYMENT_MODEL_NAME")
-    
-    AZURE_AI_FOUNDRY_API_KEY = os.getenv("AZURE_AI_FOUNDRY_API_KEY")
-    
-    LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
-    ENVIRONMENT = os.getenv("ENVIRONMENT")
-    PROMPTS_DIRECTORY = os.getenv("PROMPTS_DIRECTORY")
-    
-    INITIAL_INTAKE_AGENT_ID = os.getenv("INITIAL_INTAKE_AGENT_ID")
-    PORTAL_AGENT_ID = os.getenv("PORTAL_AGENT_ID")
+@lru_cache()
+def get_settings() -> Settings:
+    return Settings()
 
-    # Azure Function URLs
-    GET_CLAIM_BY_CONTACT_INFO_URL = os.getenv("GET_CLAIM_BY_CONTACT_INFO_URL")
-    HTTP_TRIGGER1_URL = os.getenv("HTTP_TRIGGER1_URL")
-    INITIATE_NEW_CLAIM_URL = os.getenv("INITIATE_NEW_CLAIM_URL")
-    TRANSITION_CLAIM_TYPE_URL = os.getenv("TRANSITION_CLAIM_TYPE_URL")
-    UPDATE_CLAIM_DATA_URL = os.getenv("UPDATE_CLAIM_DATA_URL")
-    
-    def __init__(self):
-        """Validate required settings on initialization."""
-        self._validate_settings()
-    
-    def _validate_settings(self):
-        """Validate that required environment variables are set."""
-        # Check Azure AI Foundry configuration
-        if not self.AZURE_AI_FOUNDRY_ENDPOINT:
-            raise ValueError("AZURE_AI_FOUNDRY_ENDPOINT is required")
-        if not self.AZURE_AI_FOUNDRY_DEPLOYMENT_MODEL_NAME:
-            raise ValueError("AZURE_AI_FOUNDRY_DEPLOYMENT_MODEL_NAME is required")
-        
-        # Check Redis configuration
-        if not self.REDIS_HOST:
-            raise ValueError("REDIS_HOST is required")
-        if not self.REDIS_PASSWORD:
-            raise ValueError("REDIS_PASSWORD is required")
-    
-    @property
-    def REDIS_URL(self) -> str:
-        """Get Redis connection URL."""
-        return f"{self.REDIS_HOST}:{self.REDIS_PORT}"
-    
-    @property
-    def REDIS_CONNECTION_STRING(self) -> str:
-        """Get Redis connection string for redis-py."""
-        return f"redis://:{self.REDIS_PASSWORD}@{self.REDIS_URL}"
-
-# Create a global settings instance
-settings = Settings()
+# Create settings instance
+settings = get_settings()
