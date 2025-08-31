@@ -24,13 +24,41 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Set up Node.js for Prisma
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
       - name: Create and start virtual environment
         run: |
           python -m venv venv
           source venv/bin/activate
+
+      - name: Install Node.js dependencies
+        run: npm install
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Verify Prisma client generation
+        run: |
+          if [ -d "node_modules/.prisma/client" ]; then
+            echo "✓ Prisma client generated successfully"
+            ls -la node_modules/.prisma/client/ | head -5
+          else
+            echo "✗ Prisma client generation failed"
+            exit 1
+          fi
       
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+      - name: Install Python dependencies
+        run: |
+          source venv/bin/activate
+          pip install -r requirements.txt
+
+      - name: Verify Python Prisma package
+        run: |
+          source venv/bin/activate
+          python -c "import prisma; print('✓ Prisma Python package installed')"
         
       # Optional: Add step to run tests here (PyTest, Django test suites, etc.)
 
@@ -68,4 +96,3 @@ jobs:
         with:
           app-name: 'agentpil'
           slot-name: 'Production'
-          
