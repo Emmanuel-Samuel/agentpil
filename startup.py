@@ -23,7 +23,7 @@ def ensure_prisma_client():
 
         # The root of your application in Azure Web Apps
         working_dir = "/home/site/wwwroot"
-        schema_path = os.path.join(working_dir, "schema.prisma")
+        schema_path = os.path.join(working_dir, "prisma", "schema.prisma")
 
         logger.info(f"Working directory: {working_dir}")
         logger.info(f"Expected schema path: {schema_path}")
