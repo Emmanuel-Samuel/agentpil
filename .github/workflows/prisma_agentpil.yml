@@ -55,7 +55,6 @@ jobs:
           path: |
             .
             !venv/
-            !node_modules/
 
   deploy:
     runs-on: ubuntu-latest
@@ -87,11 +86,14 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
+      - name: Set up environment variables for Azure
+        run: |
+          echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" >> .env
+
       - name: Generate Python Prisma client for deployment
         run: |
           echo "Generating Python Prisma client for deployment..."
           source venv/bin/activate
-          echo "DATABASE_URL is set: ${DATABASE_URL:0:20}..."
           python -m prisma generate
           echo "Python Prisma client generation completed"
         env:
@@ -103,6 +105,10 @@ jobs:
           client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_C54250D3D2EF4021BB8AAD8FB19581B9 }}
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_7AEB074D8A984833B3243965D7350BD4 }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_DA2C071596BE4B0E8613A439B18ADD3F }}
+
+      - name: Configure Azure App Settings
+        run: |
+          az webapp config appsettings set --name agentpil --resource-group agentpil_group --settings DATABASE_URL="${{ secrets.DATABASE_URL }}"
 
       - name: 'Deploy to Azure Web App'
         uses: azure/webapps-deploy@v3
