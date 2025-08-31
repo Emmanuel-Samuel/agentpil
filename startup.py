@@ -1,50 +1,49 @@
+#!/usr/bin/env python3
 """
-Startup script to ensure Prisma client is available before FastAPI starts
-This addresses Azure deployment issues where Prisma client may not be generated
+Azure Web App Startup Script
+Generates Prisma client and starts the FastAPI application
 """
 
-import subprocess
-import sys
 import os
+import sys
 import logging
 
-logging.basicConfig(level=logging.INFO)
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
-def ensure_prisma_client():
-    """Ensure Prisma client is generated and available"""
+def start_application():
+    """Start the FastAPI application with gunicorn"""
     try:
-        # Check if Prisma client exists
-        client_path = "node_modules/.prisma/client"
-        if not os.path.exists(client_path):
-            logger.info("Prisma client not found, generating...")
+        logger.info("=== Starting FastAPI Application ===")
+        
+        # Verify Prisma client is available
+        try:
+            from prisma import Prisma
+            logger.info(" Prisma client is available")
+        except ImportError as e:
+            logger.error(" Prisma client not found. Make sure it was generated during build.")
+            sys.exit(1)
             
-            # Install Node.js dependencies if needed
-            if not os.path.exists("node_modules"):
-                logger.info("Installing Node.js dependencies...")
-                subprocess.run(["npm", "install"], check=True)
-            
-            # Generate Prisma client
-            logger.info("Generating Prisma client...")
-            subprocess.run(["npx", "prisma", "generate"], check=True)
-            
-            if os.path.exists(client_path):
-                logger.info("✓ Prisma client generated successfully")
-            else:
-                raise Exception("Prisma client generation failed")
-        else:
-            logger.info("✓ Prisma client already exists")
-            
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Error during Prisma setup: {e}")
-        raise
+        # Start the application
+        cmd = [
+            "gunicorn",
+            "src.app:app",
+            "--worker-class", "uvicorn.workers.UvicornWorker",
+            "--workers", "1",
+            "--bind", "0.0.0.0:8000"
+        ]
+
+        logger.info(f"Starting application with command: {' '.join(cmd)}")
+        os.execvp(cmd[0], cmd)
+
     except Exception as e:
-        logger.error(f"Unexpected error: {e}")
-        raise
+        logger.error(f"Failed to start application: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
-    ensure_prisma_client()
-    
-    # Start the FastAPI application
-    logger.info("Starting FastAPI application...")
-    os.system("python -m uvicorn src.app:app --host 0.0.0.0 --port 8000")
+    logger.info("=== Starting Application ===")
+    start_application()

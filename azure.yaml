@@ -7,8 +7,7 @@ infra:
     provider: "bicep"
 services:
   web:
-    project: src
+    project: .
     language: py
     host: appservice
-    hooks:
-      prebuild: hooks/prebuild.sh
+    run: python startup.py

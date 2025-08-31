@@ -4,34 +4,14 @@ fastapi>=0.111, <0.112
 python-dotenv==1.0.1
 aiohttp>=3.8.0
 asyncpg>=0.29.0
-# Azure AI Foundry SDK packages - latest stable versions
 azure-ai-projects>=1.0.0
 azure-identity>=1.15.0
 azure-ai-agents>=1.0.0
 azure-mgmt-resource>=23.0.0
-# Additional dependencies for testing and validation
 pydantic>=2.0.0
 requests>=2.28.0
-# FastAPI and web framework dependencies
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-pydantic==2.5.0
-pydantic-settings==2.1.0
-
-# Database dependencies
+pydantic-settings==2.1.0    
 asyncpg==0.29.0
 psycopg2-binary==2.9.9
-
-# Azure AI dependencies
-azure-identity==1.15.0
-azure-ai-projects==1.0.0b4
-
-# Utility dependencies
-python-dotenv==1.0.0
 python-multipart==0.0.6
-
-# Development dependencies (optional)
-pytest==7.4.3
-pytest-asyncio==0.21.1
-httpx==0.25.2
-
+prisma
