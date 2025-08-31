@@ -35,10 +35,15 @@ jobs:
           source venv/bin/activate
 
       - name: Install Node.js dependencies
-        run: npm install
+        run: |
+          npm install
+          chmod +x node_modules/.bin/prisma
 
       - name: Generate Prisma client
-        run: npx prisma generate
+        run: |
+          echo "Generating Prisma client..."
+          npx prisma generate
+          echo "Prisma client generation completed"
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
@@ -93,10 +98,15 @@ jobs:
           node-version: '18'
 
       - name: Install Node.js dependencies
-        run: npm install
+        run: |
+          npm install
+          chmod +x node_modules/.bin/prisma
 
       - name: Generate Prisma client for deployment
-        run: npx prisma generate
+        run: |
+          echo "Generating Prisma client for deployment..."
+          npx prisma generate
+          echo "Prisma client generation completed"
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
       
