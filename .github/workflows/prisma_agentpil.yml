@@ -28,9 +28,23 @@ jobs:
         run: |
           python -m venv venv
           source venv/bin/activate
-      
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+
+      - name: Install Python dependencies
+        run: |
+          source venv/bin/activate
+          pip install -r requirements.txt
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Generate Prisma client
+        run: |
+          echo "Generating Python Prisma client..."
+          source venv/bin/activate
+          echo "DATABASE_URL is set: ${DATABASE_URL:0:20}..."
+          python -m prisma generate
+          echo "Python Prisma client generation completed"
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         
       # Optional: Add step to run tests here (PyTest, Django test suites, etc.)
 
@@ -54,13 +68,47 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: python-app
+
+      - name: Set up Python version
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Create and start virtual environment
+        run: |
+          python -m venv venv
+          source venv/bin/activate
+
+      - name: Install Python dependencies
+        run: |
+          source venv/bin/activate
+          pip install -r requirements.txt
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Set up environment variables for Azure
+        run: |
+          echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" >> .env
+
+      - name: Generate Python Prisma client for deployment
+        run: |
+          echo "Generating Python Prisma client for deployment..."
+          source venv/bin/activate
+          python -m prisma generate
+          echo "Python Prisma client generation completed"
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
       
       - name: Login to Azure
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_0CC68FD067CA476BB7C3D9D1B9615A6A }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_E0B70E15A9614E7290E1B8E41F8DD888 }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_4C7BC6DEEC9E4184B4D068E77D9EB335 }}
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_C54250D3D2EF4021BB8AAD8FB19581B9 }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_7AEB074D8A984833B3243965D7350BD4 }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_DA2C071596BE4B0E8613A439B18ADD3F }}
+
+      - name: Configure Azure App Settings
+        run: |
+          az webapp config appsettings set --name agentpil --resource-group agentpil_group --settings DATABASE_URL="${{ secrets.DATABASE_URL }}"
 
       - name: 'Deploy to Azure Web App'
         uses: azure/webapps-deploy@v3
@@ -68,4 +116,3 @@ jobs:
         with:
           app-name: 'agentpil'
           slot-name: 'Production'
-          
