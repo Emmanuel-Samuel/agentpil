@@ -33,25 +33,18 @@ jobs:
         run: |
           source venv/bin/activate
           pip install -r requirements.txt
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
       - name: Generate Prisma client
         run: |
           echo "Generating Python Prisma client..."
           source venv/bin/activate
+          echo "DATABASE_URL is set: ${DATABASE_URL:0:20}..."
           python -m prisma generate
           echo "Python Prisma client generation completed"
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-
-      - name: Verify Python Prisma client generation
-        run: |
-          source venv/bin/activate
-          python -c "from prisma import Prisma; print('✓ Python Prisma client available')"
-
-      - name: Verify Python Prisma package
-        run: |
-          source venv/bin/activate
-          python -c "import prisma; print('✓ Prisma Python package installed')"
         
       # Optional: Add step to run tests here (PyTest, Django test suites, etc.)
 
@@ -91,11 +84,14 @@ jobs:
         run: |
           source venv/bin/activate
           pip install -r requirements.txt
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
       - name: Generate Python Prisma client for deployment
         run: |
           echo "Generating Python Prisma client for deployment..."
           source venv/bin/activate
+          echo "DATABASE_URL is set: ${DATABASE_URL:0:20}..."
           python -m prisma generate
           echo "Python Prisma client generation completed"
         env:
