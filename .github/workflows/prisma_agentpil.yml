@@ -24,45 +24,29 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Set up Node.js for Prisma
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-
       - name: Create and start virtual environment
         run: |
           python -m venv venv
           source venv/bin/activate
 
-      - name: Install Node.js dependencies
-        run: |
-          npm ci
-          npm list prisma @prisma/client
-          chmod +x node_modules/.bin/prisma
-          ls -la node_modules/.bin/ | grep prisma
-
-      - name: Generate Prisma client
-        run: |
-          echo "Generating Prisma client..."
-          node_modules/.bin/prisma generate
-          echo "Prisma client generation completed"
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-
-      - name: Verify Prisma client generation
-        run: |
-          if [ -d "node_modules/.prisma/client" ]; then
-            echo "✓ Prisma client generated successfully"
-            ls -la node_modules/.prisma/client/ | head -5
-          else
-            echo "✗ Prisma client generation failed"
-            exit 1
-          fi
-      
       - name: Install Python dependencies
         run: |
           source venv/bin/activate
           pip install -r requirements.txt
+
+      - name: Generate Prisma client
+        run: |
+          echo "Generating Python Prisma client..."
+          source venv/bin/activate
+          python -m prisma generate
+          echo "Python Prisma client generation completed"
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Verify Python Prisma client generation
+        run: |
+          source venv/bin/activate
+          python -c "from prisma import Prisma; print('✓ Python Prisma client available')"
 
       - name: Verify Python Prisma package
         run: |
@@ -79,7 +63,6 @@ jobs:
             .
             !venv/
             !node_modules/
-            node_modules/.prisma/
 
   deploy:
     runs-on: ubuntu-latest
@@ -94,23 +77,27 @@ jobs:
         with:
           name: python-app
 
-      - name: Set up Node.js for Prisma
-        uses: actions/setup-node@v4
+      - name: Set up Python version
+        uses: actions/setup-python@v5
         with:
-          node-version: '18'
+          python-version: '3.12'
 
-      - name: Install Node.js dependencies
+      - name: Create and start virtual environment
         run: |
-          npm ci
-          npm list prisma @prisma/client
-          chmod +x node_modules/.bin/prisma
-          ls -la node_modules/.bin/ | grep prisma
+          python -m venv venv
+          source venv/bin/activate
 
-      - name: Generate Prisma client for deployment
+      - name: Install Python dependencies
         run: |
-          echo "Generating Prisma client for deployment..."
-          node_modules/.bin/prisma generate
-          echo "Prisma client generation completed"
+          source venv/bin/activate
+          pip install -r requirements.txt
+
+      - name: Generate Python Prisma client for deployment
+        run: |
+          echo "Generating Python Prisma client for deployment..."
+          source venv/bin/activate
+          python -m prisma generate
+          echo "Python Prisma client generation completed"
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
       
