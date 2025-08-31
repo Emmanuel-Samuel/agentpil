@@ -4,7 +4,7 @@
 
 name: Build and deploy Python app to Azure Web App - agentpil
 
-on:
+on:a
   push:
     branches:
       - prisma
@@ -112,3 +112,4 @@ jobs:
         with:
           app-name: 'agentpil'
           slot-name: 'Production'
+
