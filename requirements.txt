@@ -8,4 +8,4 @@ azure-ai-agents
 azure-identity
 azure-mgmt-resource
 pydantic-settings
-
+prisma
