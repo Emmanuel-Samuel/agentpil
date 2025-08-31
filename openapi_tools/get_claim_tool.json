@@ -7,14 +7,14 @@
     "version": "1.0.0"
   },
   "servers": [
-    { "url": "https://ec202d6f0fb0.ngrok-free.app" }
+    { "url": "https://b23c85f946cd.ngrok-free.app" }
   ],
   "auth": [],
   "paths": {
     "/api/claims/{claim_id}": {
       "get": {
         "description": "Retrieve detailed information about a specific claim. Used by claim continuation agents to identify missing fields and guide the conversation.",
-        "operationId": "get_claim",
+        "operationId": "get_claim_tool",
         "parameters": [
           {
             "name": "claim_id",
@@ -52,7 +52,7 @@
                         "health_insurance": { "type": "boolean" },
                         "relationship": { 
                           "type": "string",
-                          "enum": ["Self", "Parent", "Child", "Sibiling", "Friend", "Representative", "Other"]
+                          "enum": ["Self", "Parent", "Child", "Sibling", "Friend", "Representative", "Other"]
                         },
                         "other_relationship": { "type": "string" },
                         "health_insurance_number": { "type": "string" },

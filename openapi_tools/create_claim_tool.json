@@ -1,20 +1,20 @@
 {
-  "name": "save_claim_data_tool",
+  "name": "create_claim_tool",
   "openapi": "3.1.0",
   "info": {
-    "title": "Save Claim Data Tool",
-    "description": "Tool for creating and saving legal claim data to the database using Prisma ORM",
+    "title": "Create Claim Tool",
+    "description": "Tool for creating legal claim data to the database using Prisma ORM",
     "version": "2.0.0"
   },
   "servers": [
-    { "url": "https://f71ad14b90bf.ngrok-free.app" }
+    { "url": "https://b23c85f946cd.ngrok-free.app" }
   ],
   "auth": [],
   "paths": {
     "/api/claims": {
       "post": {
         "description": "Create a new claim with all necessary details and relationships",
-        "operationId": "create_claim",
+        "operationId": "create_claim_tool",
         "requestBody": {
           "required": true,
           "content": {
@@ -43,13 +43,13 @@
                     "type": "boolean",
                     "description": "Whether the user has health insurance"
                   },
-                  "user_id": {
+                  "userId": {
                     "type": "string",
                     "description": "ID of the user creating the claim"
                   },
                   "relationship": {
                     "type": "string",
-                    "enum": ["Self", "Parent", "Child", "Sibiling", "Friend", "Representative", "Other"],
+                    "enum": ["Self", "Parent", "Child", "Sibling", "Friend", "Representative", "Other"],
                     "description": "Relationship to the injured party"
                   },
                   "otherRelationship": {
@@ -81,31 +81,43 @@
                         "type": "string",
                         "description": "Detailed description of the incident"
                       },
-                      "witnesses": {
-                        "type": "array",
-                        "items": {
-                          "type": "object",
-                          "properties": {
-                            "name": { "type": "string" },
-                            "phone": { "type": "string" }
-                          }
-                        }
+                      "reportNumber": {
+                        "type": "string",
+                        "description": "Police report number if available"
                       },
-                      "policeReportNumber": {
-                        "type": "string"
+                      "reportCompleted": {
+                        "type": "boolean",
+                        "description": "Whether an accident report was filed"
                       },
-                      "injuries": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        },
-                        "description": "List of injuries sustained in the incident"
+                      "policeReportCompleted": {
+                        "type": "boolean",
+                        "description": "Whether a police report was filed"
+                      },
+                      "workRelated": {
+                        "type": "boolean",
+                        "description": "Whether the incident was work-related"
+                      },
+                      "supportingDocument": {
+                        "type": "boolean",
+                        "description": "Whether pictures were taken"
+                      },
+                      "witness": {
+                        "type": "boolean",
+                        "description": "Whether there were witnesses to the incident"
+                      },
+                      "priorRepresentation": {
+                        "type": "boolean",
+                        "description": "Whether user currently has legal representation"
+                      },
+                      "lostEarning": {
+                        "type": "string",
+                        "description": "Information about missed time from work or school"
                       }
                     },
                     "required": ["datetime", "location", "description"]
                   }
                 },
-                "required": ["title", "description", "user_id"]
+                "required": ["title", "description", "incident", "userId"]
               }
             }
           }

@@ -10,3 +10,5 @@ services:
     project: src
     language: py
     host: appservice
+    hooks:
+      prebuild: hooks/prebuild.sh

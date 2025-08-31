@@ -7,14 +7,14 @@
     "version": "2.0.0"
   },
   "servers": [
-    { "url": "https://f71ad14b90bf.ngrok-free.app" }
+    { "url": "https://b23c85f946cd.ngrok-free.app" }
   ],
   "auth": [],
   "paths": {
     "/api/users/{user_id}": {
       "get": {
         "description": "Retrieve a user's profile information by ID",
-        "operationId": "get_user_profile",
+        "operationId": "get_user_profile_tool",
         "parameters": [
           {
             "name": "user_id",

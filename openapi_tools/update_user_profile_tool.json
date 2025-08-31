@@ -7,14 +7,14 @@
     "version": "3.0.0"
   },
   "servers": [
-    { "url": "https://ec202d6f0fb0.ngrok-free.app" }
+    { "url": "https://b23c85f946cd.ngrok-free.app" }
   ],
   "auth": [],
   "paths": {
     "/api/users/{user_id}": {
       "patch": {
         "description": "Update a user's profile information with one or more fields. Only provided fields will be updated.",
-        "operationId": "update_user_profile",
+        "operationId": "update_user_profile_tool",
         "parameters": [
           {
             "name": "user_id",
