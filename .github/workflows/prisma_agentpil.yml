@@ -106,10 +106,6 @@ jobs:
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_7AEB074D8A984833B3243965D7350BD4 }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_DA2C071596BE4B0E8613A439B18ADD3F }}
 
-      - name: Configure Azure App Settings
-        run: |
-          az webapp config appsettings set --name agentpil --resource-group agentpil_group --settings DATABASE_URL="${{ secrets.DATABASE_URL }}"
-
       - name: 'Deploy to Azure Web App'
         uses: azure/webapps-deploy@v3
         id: deploy-to-webapp
