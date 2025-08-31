@@ -11,19 +11,16 @@ def ensure_prisma_client():
     try:
         logger.info("=== Prisma Client Setup ===")
         
-        # Always try to generate Prisma client in Azure environment
-        logger.info("Installing Node.js dependencies...")
-        subprocess.run(["npm", "install"], check=True, cwd="/home/site/wwwroot")
+        # Always try to generate Python Prisma client in Azure environment
+        logger.info("Generating Python Prisma client...")
+        subprocess.run([sys.executable, "-m", "prisma", "generate"], check=True, cwd="/home/site/wwwroot")
         
-        logger.info("Generating Prisma client...")
-        subprocess.run(["npx", "prisma", "generate"], check=True, cwd="/home/site/wwwroot")
-        
-        # Verify generation
-        client_path = "/home/site/wwwroot/node_modules/.prisma/client"
-        if os.path.exists(client_path):
-            logger.info("✓ Prisma client generated successfully")
-        else:
-            logger.warning("Prisma client path not found, but generation completed")
+        # Verify Python Prisma client generation
+        try:
+            from prisma import Prisma
+            logger.info("✓ Python Prisma client generated successfully")
+        except ImportError as e:
+            logger.warning(f"Python Prisma client import failed: {e}")
             
     except subprocess.CalledProcessError as e:
         logger.error(f"Error during Prisma setup: {e}")
