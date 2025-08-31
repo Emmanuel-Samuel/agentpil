@@ -36,13 +36,15 @@ jobs:
 
       - name: Install Node.js dependencies
         run: |
-          npm install
+          npm ci
+          npm list prisma @prisma/client
           chmod +x node_modules/.bin/prisma
+          ls -la node_modules/.bin/ | grep prisma
 
       - name: Generate Prisma client
         run: |
           echo "Generating Prisma client..."
-          npx prisma generate
+          node_modules/.bin/prisma generate
           echo "Prisma client generation completed"
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -99,13 +101,15 @@ jobs:
 
       - name: Install Node.js dependencies
         run: |
-          npm install
+          npm ci
+          npm list prisma @prisma/client
           chmod +x node_modules/.bin/prisma
+          ls -la node_modules/.bin/ | grep prisma
 
       - name: Generate Prisma client for deployment
         run: |
           echo "Generating Prisma client for deployment..."
-          npx prisma generate
+          node_modules/.bin/prisma generate
           echo "Prisma client generation completed"
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
