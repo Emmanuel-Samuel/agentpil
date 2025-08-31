@@ -35,10 +35,21 @@ jobs:
           source venv/bin/activate
 
       - name: Install Node.js dependencies
-        run: npm install
+        run: |
+          npm install
+          chmod +x node_modules/.bin/prisma
+
+      - name: Verify Prisma CLI installation
+        run: |
+          echo "Checking Prisma CLI..."
+          ./node_modules/.bin/prisma --version
+          ls -la node_modules/.bin/ | grep prisma
 
       - name: Generate Prisma client
-        run: npx prisma generate
+        run: |
+          echo "Generating Prisma client..."
+          ./node_modules/.bin/prisma generate
+          echo "Prisma generation completed"
 
       - name: Verify Prisma client generation
         run: |
