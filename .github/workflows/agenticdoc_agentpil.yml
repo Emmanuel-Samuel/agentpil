@@ -58,6 +58,8 @@ jobs:
         labels: ${{ steps.meta.outputs.labels }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
+
+
     
     # Deploy to Azure Web App
     - name: Deploy to Azure Web App
@@ -66,3 +68,4 @@ jobs:
         app-name: ${{ env.AZURE_WEBAPP_NAME }}
         publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
         images: ${{ env.REGISTRY }}/${{ steps.lowercase_repo.outputs.lowercase_repo }}:${{ github.sha }}
+
