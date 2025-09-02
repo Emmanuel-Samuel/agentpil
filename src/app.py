@@ -1,457 +1,204 @@
-"""
-Simplified FastAPI Application for AI Legal Claims Assistant
-
-Clean, minimal endpoints with proper separation between portal and initial chat.
-Removed over-engineered validation and redundant code.
-"""
-
-from fastapi import FastAPI, HTTPException, Request, Path
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+import json
 import logging
-from contextlib import asynccontextmanager
 import time
-from typing import Any, Dict, Optional, List
-from pydantic import BaseModel, Field
-from datetime import datetime
-from enum import Enum
+import asyncio
+from typing import Dict, Any, Optional
+from azure.identity.aio import DefaultAzureCredential
+from azure.ai.projects.aio import AIProjectClient
+from azure.ai.agents.models import MessageRole, ListSortOrder
 
-from .config.config import settings
-from .services.database import (
-    get_user_by_id, 
-    get_user_claims, 
-    create_claim, 
-    get_claim_by_id, 
-    update_claim,
-    update_user,
-    initialize_db,
-    close_db
-)
-from .services.ai_agent_service import ai_agent_service
+from ..config.config import settings
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Application lifespan management"""
-    logger.info("Starting FastAPI application...")
+class AIAgentService:
+    """Simplified Azure AI Foundry agent service"""
     
-    # Initialize database and AI service
-    await initialize_db()
-    await ai_agent_service.initialize()
+    def __init__(self):
+        self.credential = DefaultAzureCredential()
+        self.project_client = None
+        self.agents_client = None
+        self._connected = False
     
-    logger.info("Application started - OpenAPI docs at /docs")
+    async def initialize(self):
+        """Initialize the Azure AI Project client"""
+        try:
+            if not self._connected:
+                self.project_client = AIProjectClient(
+                    endpoint=settings.azure_ai_foundry_endpoint,
+                    credential=self.credential,
+                )
+                
+                await self.project_client.__aenter__()
+                self.agents_client = self.project_client.agents
+                self._connected = True
+                
+                logger.info("Azure AI Agent Service initialized")
+                
+        except Exception as e:
+            logger.error(f"Failed to initialize Azure AI Agent Service: {str(e)}")
+            raise
     
-    yield
+    async def close(self):
+        """Close the Azure AI Project client"""
+        try:
+            if self._connected and self.project_client:
+                await self.project_client.__aexit__(None, None, None)
+                self._connected = False
+                logger.info("Azure AI Agent Service closed")
+        except Exception as e:
+            logger.error(f"Error closing Azure AI Agent Service: {str(e)}")
     
-    # Shutdown
-    logger.info("Shutting down...")
-    await ai_agent_service.close()
-    await close_db()
-    logger.info("Shutdown complete")
-
-# Create FastAPI app
-app = FastAPI(
-    title="AI Legal Claims Assistant",
-    description="Simplified FastAPI application with Azure AI Foundry integration",
-    version="2.0.0",
-    lifespan=lifespan
-)
-
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.allowed_origins,
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["*"],
-)
-
-# Enums
-class ClaimStatus(str, Enum):
-    PENDING_INFORMATION = "PENDING_INFORMATION"
-    UNDER_REVIEW = "UNDER_REVIEW"
-    PENDING_DOCUMENTS = "PENDING_DOCUMENTS"
-    INVESTIGATION = "INVESTIGATION"
-    PRE_SUIT = "PRE_SUIT"
-    PRE_LITIGATION = "PRE_LITIGATION"
-    LITIGATION = "LITIGATION"
-    RESOLVED_AND_CLOSED = "RESOLVED_AND_CLOSED"
-
-class Relationship(str, Enum):
-    SELF = "Self"
-    PARENT = "Parent"
-    CHILD = "Child"
-    SIBLING = "Sibling"
-    FRIEND = "Friend"
-    REPRESENTATIVE = "Representative"
-    OTHER = "Other"
-
-# Simplified Models
-class WitnessInfo(BaseModel):
-    name: str
-    phone: Optional[str] = None
-
-class IncidentDetails(BaseModel):
-    datetime: datetime
-    location: str
-    description: str
-    witnesses: Optional[List[WitnessInfo]] = []
-    reportNumber: Optional[str] = ""
-    reportCompleted: Optional[bool] = False
-    injuries: Optional[List[str]] = []
-    workRelated: Optional[bool] = False
-
-class SaveClaimRequest(BaseModel):
-    title: str
-    description: str
-    incident: IncidentDetails
-    status: Optional[ClaimStatus] = ClaimStatus.PENDING_INFORMATION
-    injured: Optional[bool] = True
-    healthInsurance: Optional[bool] = None
-    userId: str
-    relationship: Optional[Relationship] = None
-    otherRelationship: Optional[str] = None
-    healthInsuranceNumber: Optional[str] = None
-    isOver65: Optional[bool] = None
-
-class UpdateClaimRequest(BaseModel):
-    """Request model for updating claim data"""
-    status: Optional[ClaimStatus] = None
-    injured: Optional[bool] = None
-    relationship: Optional[Relationship] = None
-    otherRelationship: Optional[str] = None
-    healthInsurance: Optional[bool] = None
-    healthInsuranceNumber: Optional[str] = None
-    isOver65: Optional[bool] = None
-    receiveMedicare: Optional[List[str]] = None
-    assignedCaseManager: Optional[str] = None
-
-class UpdateUserRequest(BaseModel):
-    """Request model for updating user profile"""
-    firstName: Optional[str] = None
-    lastName: Optional[str] = None
-    email: Optional[str] = None
-    phoneNumber: Optional[str] = None
-    dateOfBirth: Optional[str] = None
-    address_street: Optional[str] = None
-    address_city: Optional[str] = None
-    address_state: Optional[str] = None
-    address_postalCode: Optional[str] = None
-
-class ChatMessage(BaseModel):
-    message: str
-    user_id: str
-    claim_id: Optional[str] = None
-    thread_id: Optional[str] = None
-
-class ChatResponse(BaseModel):
-    message: str
-    success: bool
-    thread_id: Optional[str] = None
-    user_id: str
-    timestamp: float
-    error: Optional[str] = None
-
-@app.post("/chat/initial", response_model=ChatResponse, tags=["chat"])
-async def chat_initial_endpoint(chat_message: ChatMessage):
-    """Initial chat interaction - routes to initial intake agent"""
-    try:
-        if not chat_message.user_id.strip():
-            raise HTTPException(status_code=400, detail="Invalid user_id")
+    async def chat(
+        self,
+        message: str,
+        user_id: str,
+        thread_id: Optional[str] = None,
+        claim_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Unified chat method - handles all agent interactions
         
-        logger.info(f"Initial chat from user {chat_message.user_id}")
-        
-        # Process with AI agent service
-        response = await ai_agent_service.chat(
-            message=chat_message.message,
-            user_id=chat_message.user_id,
-            thread_id=None,  # New conversation
-            claim_id=chat_message.claim_id
-        )
-        
-        return ChatResponse(
-            message=response.get("message", "No response"),
-            success=response.get("success", True),
-            thread_id=response.get("thread_id"),
-            user_id=chat_message.user_id,
-            timestamp=time.time(),
-            error=response.get("error")
-        )
-        
-    except Exception as e:
-        logger.error(f"Error in initial chat: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/chat/portal", response_model=ChatResponse, tags=["chat"])
-async def chat_portal_endpoint(chat_message: ChatMessage):
-    """Portal chat interaction - routes to portal agent"""
-    try:
-        logger.info(f"Portal chat from user {chat_message.user_id}")
-        
-        # Process with AI agent service
-        response = await ai_agent_service.chat(
-            message=chat_message.message,
-            user_id=chat_message.user_id,
-            thread_id=chat_message.thread_id,
-            claim_id=chat_message.claim_id
-        )
-        
-        return ChatResponse(
-            message=response.get("message", "No response"),
-            success=response.get("success", True),
-            thread_id=response.get("thread_id"),
-            user_id=chat_message.user_id,
-            timestamp=time.time(),
-            error=response.get("error")
-        )
-        
-    except Exception as e:
-        logger.error(f"Error in portal chat: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.delete("/chat/threads/{thread_id}", tags=["chat"])
-async def delete_thread_endpoint(thread_id: str = Path(...)):
-    """Delete a conversation thread"""
-    try:
-        success = await ai_agent_service.delete_thread(thread_id)
-        
-        return {
-            "success": success,
-            "message": "Thread deleted successfully" if success else "Failed to delete thread",
-            "thread_id": thread_id
-        }
-        
-    except Exception as e:
-        logger.error(f"Error deleting thread: {str(e)}")
-        return JSONResponse(
-            status_code=200,
-            content={
+        Args:
+            message: User message
+            user_id: User identifier
+            thread_id: Optional existing thread ID for conversation continuity
+            claim_id: Optional claim ID for context
+            
+        Returns:
+            Response with agent message and thread info
+        """
+        try:
+            if not self._connected:
+                await self.initialize()
+            
+            if not settings.main_orchestrator_agent_id:
+                raise ValueError("MAIN_ORCHESTRATOR_AGENT_ID not configured")
+            
+            # Create or use existing thread
+            if thread_id:
+                thread = await self.agents_client.threads.get(thread_id=thread_id)
+            else:
+                thread = await self.agents_client.threads.create()
+                thread_id = thread.id
+            
+            # Create structured message with context
+            structured_message = {
+                "user_id": user_id,
+                "message": message
+            }
+            
+            # Only add claim_id if it has a value
+            if claim_id:
+                structured_message["claim_id"] = claim_id
+            
+            # Add message to thread
+            await self.agents_client.messages.create(
+                thread_id=thread_id,
+                role=MessageRole.USER,
+                content=json.dumps(structured_message)
+            )
+            
+            # Create and process run
+            run = await self.agents_client.runs.create_and_process(
+                thread_id=thread_id,
+                agent_id=settings.main_orchestrator_agent_id
+            )
+            
+            # Wait for completion and get response
+            response = await self._get_agent_response(thread_id, run.id)
+            
+            return {
+                **response,
+                "thread_id": thread_id,
+                "user_id": user_id,
+                "timestamp": time.time()
+            }
+                
+        except Exception as e:
+            logger.error(f"Error in chat: {str(e)}")
+            return {
                 "success": False,
-                "message": "Error occurred while deleting thread",
+                "error": str(e),
+                "message": "I'm sorry, I encountered an error. Please try again later.",
                 "thread_id": thread_id
             }
-        )
-
-
-@app.post("/api/claims", 
-          status_code=201,
-          operation_id="create_claim_tool",
-          tags=["claims"])
-async def create_claim_endpoint(request: SaveClaimRequest):
-    """Create a new claim"""
-    try:
-        if not request.userId.strip():
-            raise HTTPException(status_code=400, detail="Invalid userId")
-        
-        logger.info(f"Creating claim for user {request.userId}")
-        
-        # Create claim using database service
-        result = await create_claim(request.model_dump())
-        
-        if not result or not result.get("success"):
-            raise HTTPException(
-                status_code=500, 
-                detail=result.get("message", "Failed to create claim")
+    
+    async def _get_agent_response(self, thread_id: str, run_id: str) -> Dict[str, Any]:
+        """Wait for run completion and extract agent response"""
+        try:
+            # Wait for completion
+            run = await self.agents_client.runs.get(thread_id=thread_id, run_id=run_id)
+            while run.status in ["queued", "in_progress"]:
+                await asyncio.sleep(1)
+                run = await self.agents_client.runs.get(thread_id=thread_id, run_id=run_id)
+            
+            if run.status == "failed":
+                logger.error(f"Run failed: {run.last_error}")
+                return {
+                    "success": False,
+                    "message": "I encountered an error processing your request."
+                }
+            
+            # Get latest agent message
+            messages = self.agents_client.messages.list(
+                thread_id=thread_id, 
+                order=ListSortOrder.DESCENDING
             )
-        
-        return JSONResponse(
-            status_code=201,
-            content={
-                "success": True,
-                "message": "Claim created successfully",
-                "data": result
+            
+            async for msg in messages:
+                if msg.role == MessageRole.AGENT and msg.text_messages:
+                    return {
+                        "success": True,
+                        "message": msg.text_messages[-1].text.value
+                    }
+            
+            return {
+                "success": False,
+                "message": "No response generated"
             }
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error creating claim: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/users/{user_id}/claims", tags=["claims"])
-async def get_claims_endpoint(
-    user_id: str = Path(...),
-    status: Optional[ClaimStatus] = None,
-    limit: int = 10,
-    offset: int = 0
-):
-    """Get claims for a user"""
-    try:
-        if limit < 1 or limit > 100:
-            raise HTTPException(status_code=400, detail="Limit must be between 1 and 100")
-        
-        claims = await get_user_claims(
-            user_id=user_id,
-            status=status.value if status else None
-        )
-        
-        # Apply pagination
-        paginated_claims = claims[offset:offset + limit]
-        
-        return {
-            "success": True,
-            "data": paginated_claims,
-            "pagination": {
-                "total": len(claims),
-                "limit": limit,
-                "offset": offset,
-                "hasMore": (offset + limit) < len(claims)
+            
+        except Exception as e:
+            logger.error(f"Error getting agent response: {str(e)}")
+            return {
+                "success": False,
+                "message": "I encountered an error processing your request."
             }
-        }
-        
-    except Exception as e:
-        logger.error(f"Error retrieving claims: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    
+    async def delete_thread(self, thread_id: str) -> bool:
+        """Delete a conversation thread"""
+        try:
+            if not self._connected:
+                await self.initialize()
+            
+            await self.agents_client.threads.delete(thread_id=thread_id)
+            logger.info(f"Deleted thread {thread_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error deleting thread {thread_id}: {str(e)}")
+            return False
+    
+    async def get_status(self) -> Dict[str, Any]:
+        """Get service status"""
+        try:
+            if not self._connected:
+                await self.initialize()
+            
+            return {
+                "connected": self._connected,
+                "endpoint": settings.azure_ai_foundry_endpoint,
+                "agent_id": settings.main_orchestrator_agent_id,
+                "status": "operational" if self._connected else "disconnected"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting status: {str(e)}")
+            return {
+                "connected": False,
+                "error": str(e),
+                "status": "error"
+            }
 
-@app.get("/api/claims/{claim_id}", 
-         operation_id="get_claim_tool",
-         tags=["claims"])
-async def get_claim_endpoint(claim_id: str = Path(...)):
-    """Get claim details"""
-    try:
-        if not claim_id.strip():
-            raise HTTPException(status_code=400, detail="Invalid claim_id")
-        
-        claim = await get_claim_by_id(claim_id)
-        
-        if not claim:
-            raise HTTPException(status_code=404, detail="Claim not found")
-        
-        return {
-            "success": True,
-            "data": claim
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error retrieving claim: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.put("/api/claims/{claim_id}", 
-         operation_id="update_claim_data_tool",
-         tags=["claims"])
-async def update_claim_endpoint(
-    request: UpdateClaimRequest,
-    claim_id: str = Path(...)
-):
-    """Update claim data"""
-    try:
-        # Convert request to dict, excluding None values
-        updates = {k: v for k, v in request.model_dump().items() if v is not None}
-        
-        if not updates:
-            raise HTTPException(status_code=400, detail="No valid fields to update")
-        
-        result = await update_claim(claim_id, updates)
-        
-        if not result:
-            raise HTTPException(status_code=404, detail="Claim not found or update failed")
-        
-        return {
-            "success": True,
-            "message": "Claim updated successfully",
-            "data": result
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error updating claim {claim_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-@app.patch("/api/users/{user_id}", 
-          operation_id="update_user_profile_tool",
-          tags=["users"])
-async def update_user_profile_endpoint(
-    request: UpdateUserRequest,
-    user_id: str = Path(...)
-):
-    """Update user profile"""
-    try:
-        # Convert request to dict, excluding None values
-        updates = {k: v for k, v in request.model_dump().items() if v is not None}
-        
-        if not updates:
-            raise HTTPException(status_code=400, detail="No valid fields to update")
-        
-        result = await update_user(user_id, updates)
-        
-        if not result:
-            raise HTTPException(status_code=404, detail="User not found or update failed")
-        
-        return {
-            "success": True,
-            "message": "User profile updated successfully",
-            "data": result
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error updating user {user_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-@app.get("/api/users/{user_id}", 
-         operation_id="get_user_profile_tool",
-         tags=["users"])
-async def get_user_endpoint(user_id: str = Path(...)):
-    """Get user profile"""
-    try:
-        if not user_id.strip():
-            raise HTTPException(status_code=400, detail="Invalid user_id")
-        
-        user = await get_user_by_id(user_id)
-        
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-        
-        return {
-            "success": True,
-            "data": user
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error retrieving user: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/agents/status", tags=["system"])
-async def get_agents_status():
-    """Get agent service status"""
-    try:
-        return await ai_agent_service.get_status()
-    except Exception as e:
-        logger.error(f"Error getting agent status: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/health", tags=["system"])
-async def health_check():
-    """Health check endpoint"""
-    return {"status": "healthy", "timestamp": time.time()}
-
-@app.get("/", tags=["system"])
-async def root():
-    """Root endpoint"""
-    return {
-        "message": "AI Legal Claims Assistant API", 
-        "status": "healthy", 
-        "docs": "/docs",
-        "health": "/health"
-    }
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(
-        app,
-        host="127.0.0.1",  # Listen on localhost only
-        port=8000,
-        reload=False,  # Set to False when running as module
-        log_level="info"
-    )
+# Global service instance
+ai_agent_service = AIAgentService()
