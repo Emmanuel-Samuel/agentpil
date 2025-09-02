@@ -436,6 +436,15 @@ async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "timestamp": time.time()}
 
+@app.get("/", tags=["system"])
+async def root():
+    """Root endpoint"""
+    return {
+        "message": "AI Legal Claims Assistant API", 
+        "status": "healthy", 
+        "docs": "/docs",
+        "health": "/health"
+    }
 
 if __name__ == "__main__":
     import uvicorn
