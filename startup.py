@@ -28,13 +28,16 @@ def start_application():
             logger.error(" Prisma client not found. Make sure it was generated during build.")
             sys.exit(1)
             
+        # Get port from environment variable (Azure Web Apps) or default to 8000
+        port = int(os.environ.get("PORT", 8000))
+        
         # Start the application
         cmd = [
             "gunicorn",
             "src.app:app",
             "--worker-class", "uvicorn.workers.UvicornWorker",
             "--workers", "1",
-            "--bind", "0.0.0.0:8000"
+            "--bind", f"0.0.0.0:{port}"
         ]
 
         logger.info(f"Starting application with command: {' '.join(cmd)}")
