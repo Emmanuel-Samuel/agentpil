@@ -1,244 +1,448 @@
-import asyncio
+"""
+Simplified FastAPI Application for AI Legal Claims Assistant
+
+Clean, minimal endpoints with proper separation between portal and initial chat.
+Removed over-engineered validation and redundant code.
+"""
+
+from fastapi import FastAPI, HTTPException, Request, Path
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, BackgroundTasks, HTTPException
-from pydantic import BaseModel
-from typing import Optional
-from fastapi.middleware.cors import CORSMiddleware
+import time
+from typing import Any, Dict, Optional, List
+from pydantic import BaseModel, Field
+from datetime import datetime
+from enum import Enum
 
-
-from .config import settings
-from .services.redis_service import RedisService
-from .services.cosmosdb_service import CosmosDBService
-from .services.ai_agent_service import AIAgentService
-from .services.poml_service import POMLService
-
-# Set up logging
-logging.basicConfig(
-    level=getattr(logging, settings.LOG_LEVEL.upper()),
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+from .config.config import settings
+from .services.database import (
+    get_user_by_id, 
+    get_user_claims, 
+    create_claim, 
+    get_claim_by_id, 
+    update_claim,
+    update_user,
+    initialize_db,
+    close_db
 )
-logger = logging.getLogger(__name__)
+from .services.ai_agent_service import ai_agent_service
 
-# Global service instances
-redis_service: Optional[RedisService] = None
-cosmosdb_service: Optional[CosmosDBService] = None
-ai_agent_service: Optional[AIAgentService] = None
-poml_service: Optional[POMLService] = None
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Manage application lifespan events."""
-    global redis_service, cosmosdb_service, ai_agent_service, poml_service
+    """Application lifespan management"""
+    logger.info("Starting FastAPI application...")
     
-    try:
-        # Initialize services
-        logger.info("Initializing services...")
-        
-        redis_service = RedisService()
-        cosmosdb_service = CosmosDBService(
-            url=settings.COSMOS_DB_URL,
-            key=settings.COSMOS_DB_KEY,
-            database_name=settings.COSMOS_DB_DATABASE_NAME,
-            container_name=settings.COSMOS_DB_CONTAINER_NAME
-        )
-        ai_agent_service = AIAgentService()
-        poml_service = POMLService(prompts_directory=settings.PROMPTS_DIRECTORY)
-        
-        # Initialize AI agents with POML templates
-        await initialize_agents()
-        
-        logger.info("Application startup complete")
-        yield
-        
-    except Exception as e:
-        logger.error(f"Error during startup: {str(e)}")
-        raise
-    finally:
-        # Cleanup
-        logger.info("Application shutdown - cleaning up services...")
-        if ai_agent_service:
-            ai_agent_service.close()
+    # Initialize database and AI service
+    await initialize_db()
+    await ai_agent_service.initialize()
+    
+    logger.info("Application started - OpenAPI docs at /docs")
+    
+    yield
+    
+    # Shutdown
+    logger.info("Shutting down...")
+    await ai_agent_service.close()
+    await close_db()
+    logger.info("Shutdown complete")
 
-async def initialize_agents():
-    """Initialize AI agents with their POML-defined instructions."""
-    try:
-        # Initialize Initial Intake Agent
-        initial_instructions = poml_service.get_agent_instructions("initial_agent")
-        await ai_agent_service.create_or_get_agent(
-            agent_name="initial_intake_agent",
-            instructions=initial_instructions
-        )
-        logger.info("Initialized initial_intake_agent")
-        
-        # Initialize Portal Agent (for future use)
-        portal_instructions = poml_service.get_agent_instructions("portal_agent")
-        await ai_agent_service.create_or_get_agent(
-            agent_name="portal_claim_agent", 
-            instructions=portal_instructions
-        )
-        logger.info("Initialized portal_claim_agent")
-        
-    except Exception as e:
-        logger.error(f"Error initializing agents: {str(e)}")
-        raise
-
-# Create FastAPI app with lifespan management
+# Create FastAPI app
 app = FastAPI(
-    title="AI Chatbot for Law Firm",
-    description="A sophisticated AI chatbot system for personal injury law firm",
-    version="1.0.0",
+    title="AI Legal Claims Assistant",
+    description="Simplified FastAPI application with Azure AI Foundry integration",
+    version="2.0.0",
     lifespan=lifespan
 )
 
-# Pydantic models
-class ChatMessage(BaseModel):
-    user_id: str
-    message: str
-
-class ChatResponse(BaseModel):
-    response: str
-    history: list
-
-@app.post("/chat/initial", response_model=ChatResponse)
-async def chat_initial_endpoint(chat_message: ChatMessage, background_tasks: BackgroundTasks):
-    """Handle initial intake agent conversations."""
-    try:
-        user_id = chat_message.user_id
-        user_message = chat_message.message
-        
-        logger.info(f"Initial chat request from user {user_id}: {user_message}")
-        
-        # Get conversation history from Redis
-        history = await redis_service.get_chat_history(user_id)
-        
-        # Get POML context for the agent
-        poml_context = {
-            'user_message': user_message,
-            'user_id': user_id,
-        }
-        
-        # Get response from Initial Intake Agent
-        ai_response_content = await ai_agent_service.get_agent_response(
-            agent_name="initial_intake_agent",
-            user_id=user_id,
-            user_message=user_message,
-            chat_history=history
-        )
-        
-        # Add messages to Redis history (short-term)
-        await redis_service.add_message_to_history(user_id, {"role": "user", "content": user_message})
-        await redis_service.add_message_to_history(user_id, {"role": "assistant", "content": ai_response_content})
-        
-        # Get updated history for response
-        updated_history = await redis_service.get_chat_history(user_id)
-        
-        # Save to Cosmos DB in background (long-term)
-        background_tasks.add_task(
-            cosmosdb_service.save_conversation, 
-            user_id, 
-            updated_history
-        )
-        
-        logger.info(f"Successfully processed initial chat for user {user_id}")
-        
-        return ChatResponse(
-            response=ai_response_content,
-            history=updated_history
-        )
-        
-    except Exception as e:
-        logger.error(f"Error in initial chat endpoint: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-@app.post("/chat/portal", response_model=ChatResponse)
-async def chat_portal_endpoint(chat_message: ChatMessage, background_tasks: BackgroundTasks):
-    """Handle portal agent conversations for authenticated users."""
-    try:
-        user_id = chat_message.user_id
-        user_message = chat_message.message
-        
-        logger.info(f"Portal chat request from user {user_id}: {user_message}")
-        
-        # Get conversation history from Redis
-        history = await redis_service.get_chat_history(user_id)
-        
-        # Get POML context for the agent
-        poml_context = {
-            'user_message': user_message,
-            'user_id': user_id,
-        }
-        
-        # Get response from Portal Claim Agent
-        ai_response_content = await ai_agent_service.get_agent_response(
-            agent_name="portal_claim_agent",
-            user_id=user_id,
-            user_message=user_message,
-            chat_history=history
-        )
-        
-        # Add messages to Redis history (short-term)
-        await redis_service.add_message_to_history(user_id, {"role": "user", "content": user_message})
-        await redis_service.add_message_to_history(user_id, {"role": "assistant", "content": ai_response_content})
-        
-        # Get updated history for response
-        updated_history = await redis_service.get_chat_history(user_id)
-        
-        # Save to Cosmos DB in background (long-term)
-        background_tasks.add_task(
-            cosmosdb_service.save_conversation, 
-            user_id, 
-            updated_history
-        )
-        
-        logger.info(f"Successfully processed portal chat for user {user_id}")
-        
-        return ChatResponse(
-            response=ai_response_content,
-            history=updated_history
-        )
-        
-    except Exception as e:
-        logger.error(f"Error in portal chat endpoint: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-@app.get("/health")
-async def health_check():
-    """Health check endpoint."""
-    return {
-        "status": "healthy",
-        "environment": settings.ENVIRONMENT,
-        "agents_initialized": len(ai_agent_service.agent_ids) if ai_agent_service else 0
-    }
-
-@app.get("/agents/status")
-async def agents_status():
-    """Get status of initialized agents."""
-    if not ai_agent_service:
-        return {"error": "AI Agent Service not initialized"}
-    
-    return {
-        "initialized_agents": list(ai_agent_service.agent_ids.keys()),
-        "active_threads": len(ai_agent_service.threads),
-        "available_templates": poml_service.list_templates() if poml_service else []
-    }
-
-@app.delete("/chat/{user_id}/history")
-async def clear_chat_history(user_id: str):
-    """
-    Clear chat history for a specific user.
-    """
-    await redis_service.redis.delete(f"chat_history:{user_id}")
-    return {"message": f"Chat history for user {user_id} cleared."}
-
+# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Add your frontend URL
+    allow_origins=settings.allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
-if __name__ == '__main__':
+# Enums
+class ClaimStatus(str, Enum):
+    PENDING_INFORMATION = "PENDING_INFORMATION"
+    UNDER_REVIEW = "UNDER_REVIEW"
+    PENDING_DOCUMENTS = "PENDING_DOCUMENTS"
+    INVESTIGATION = "INVESTIGATION"
+    PRE_SUIT = "PRE_SUIT"
+    PRE_LITIGATION = "PRE_LITIGATION"
+    LITIGATION = "LITIGATION"
+    RESOLVED_AND_CLOSED = "RESOLVED_AND_CLOSED"
+
+class Relationship(str, Enum):
+    SELF = "Self"
+    PARENT = "Parent"
+    CHILD = "Child"
+    SIBLING = "Sibling"
+    FRIEND = "Friend"
+    REPRESENTATIVE = "Representative"
+    OTHER = "Other"
+
+# Simplified Models
+class WitnessInfo(BaseModel):
+    name: str
+    phone: Optional[str] = None
+
+class IncidentDetails(BaseModel):
+    datetime: datetime
+    location: str
+    description: str
+    witnesses: Optional[List[WitnessInfo]] = []
+    reportNumber: Optional[str] = ""
+    reportCompleted: Optional[bool] = False
+    injuries: Optional[List[str]] = []
+    workRelated: Optional[bool] = False
+
+class SaveClaimRequest(BaseModel):
+    title: str
+    description: str
+    incident: IncidentDetails
+    status: Optional[ClaimStatus] = ClaimStatus.PENDING_INFORMATION
+    injured: Optional[bool] = True
+    healthInsurance: Optional[bool] = None
+    userId: str
+    relationship: Optional[Relationship] = None
+    otherRelationship: Optional[str] = None
+    healthInsuranceNumber: Optional[str] = None
+    isOver65: Optional[bool] = None
+
+class UpdateClaimRequest(BaseModel):
+    """Request model for updating claim data"""
+    status: Optional[ClaimStatus] = None
+    injured: Optional[bool] = None
+    relationship: Optional[Relationship] = None
+    otherRelationship: Optional[str] = None
+    healthInsurance: Optional[bool] = None
+    healthInsuranceNumber: Optional[str] = None
+    isOver65: Optional[bool] = None
+    receiveMedicare: Optional[List[str]] = None
+    assignedCaseManager: Optional[str] = None
+
+class UpdateUserRequest(BaseModel):
+    """Request model for updating user profile"""
+    firstName: Optional[str] = None
+    lastName: Optional[str] = None
+    email: Optional[str] = None
+    phoneNumber: Optional[str] = None
+    dateOfBirth: Optional[str] = None
+    address_street: Optional[str] = None
+    address_city: Optional[str] = None
+    address_state: Optional[str] = None
+    address_postalCode: Optional[str] = None
+
+class ChatMessage(BaseModel):
+    message: str
+    user_id: str
+    claim_id: Optional[str] = None
+    thread_id: Optional[str] = None
+
+class ChatResponse(BaseModel):
+    message: str
+    success: bool
+    thread_id: Optional[str] = None
+    user_id: str
+    timestamp: float
+    error: Optional[str] = None
+
+@app.post("/chat/initial", response_model=ChatResponse, tags=["chat"])
+async def chat_initial_endpoint(chat_message: ChatMessage):
+    """Initial chat interaction - routes to initial intake agent"""
+    try:
+        if not chat_message.user_id.strip():
+            raise HTTPException(status_code=400, detail="Invalid user_id")
+        
+        logger.info(f"Initial chat from user {chat_message.user_id}")
+        
+        # Process with AI agent service
+        response = await ai_agent_service.chat(
+            message=chat_message.message,
+            user_id=chat_message.user_id,
+            thread_id=None,  # New conversation
+            claim_id=chat_message.claim_id
+        )
+        
+        return ChatResponse(
+            message=response.get("message", "No response"),
+            success=response.get("success", True),
+            thread_id=response.get("thread_id"),
+            user_id=chat_message.user_id,
+            timestamp=time.time(),
+            error=response.get("error")
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in initial chat: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/chat/portal", response_model=ChatResponse, tags=["chat"])
+async def chat_portal_endpoint(chat_message: ChatMessage):
+    """Portal chat interaction - routes to portal agent"""
+    try:
+        logger.info(f"Portal chat from user {chat_message.user_id}")
+        
+        # Process with AI agent service
+        response = await ai_agent_service.chat(
+            message=chat_message.message,
+            user_id=chat_message.user_id,
+            thread_id=chat_message.thread_id,
+            claim_id=chat_message.claim_id
+        )
+        
+        return ChatResponse(
+            message=response.get("message", "No response"),
+            success=response.get("success", True),
+            thread_id=response.get("thread_id"),
+            user_id=chat_message.user_id,
+            timestamp=time.time(),
+            error=response.get("error")
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in portal chat: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/chat/threads/{thread_id}", tags=["chat"])
+async def delete_thread_endpoint(thread_id: str = Path(...)):
+    """Delete a conversation thread"""
+    try:
+        success = await ai_agent_service.delete_thread(thread_id)
+        
+        return {
+            "success": success,
+            "message": "Thread deleted successfully" if success else "Failed to delete thread",
+            "thread_id": thread_id
+        }
+        
+    except Exception as e:
+        logger.error(f"Error deleting thread: {str(e)}")
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": False,
+                "message": "Error occurred while deleting thread",
+                "thread_id": thread_id
+            }
+        )
+
+
+@app.post("/api/claims", 
+          status_code=201,
+          operation_id="create_claim_tool",
+          tags=["claims"])
+async def create_claim_endpoint(request: SaveClaimRequest):
+    """Create a new claim"""
+    try:
+        if not request.userId.strip():
+            raise HTTPException(status_code=400, detail="Invalid userId")
+        
+        logger.info(f"Creating claim for user {request.userId}")
+        
+        # Create claim using database service
+        result = await create_claim(request.model_dump())
+        
+        if not result or not result.get("success"):
+            raise HTTPException(
+                status_code=500, 
+                detail=result.get("message", "Failed to create claim")
+            )
+        
+        return JSONResponse(
+            status_code=201,
+            content={
+                "success": True,
+                "message": "Claim created successfully",
+                "data": result
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating claim: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/users/{user_id}/claims", tags=["claims"])
+async def get_claims_endpoint(
+    user_id: str = Path(...),
+    status: Optional[ClaimStatus] = None,
+    limit: int = 10,
+    offset: int = 0
+):
+    """Get claims for a user"""
+    try:
+        if limit < 1 or limit > 100:
+            raise HTTPException(status_code=400, detail="Limit must be between 1 and 100")
+        
+        claims = await get_user_claims(
+            user_id=user_id,
+            status=status.value if status else None
+        )
+        
+        # Apply pagination
+        paginated_claims = claims[offset:offset + limit]
+        
+        return {
+            "success": True,
+            "data": paginated_claims,
+            "pagination": {
+                "total": len(claims),
+                "limit": limit,
+                "offset": offset,
+                "hasMore": (offset + limit) < len(claims)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error retrieving claims: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/claims/{claim_id}", 
+         operation_id="get_claim_tool",
+         tags=["claims"])
+async def get_claim_endpoint(claim_id: str = Path(...)):
+    """Get claim details"""
+    try:
+        if not claim_id.strip():
+            raise HTTPException(status_code=400, detail="Invalid claim_id")
+        
+        claim = await get_claim_by_id(claim_id)
+        
+        if not claim:
+            raise HTTPException(status_code=404, detail="Claim not found")
+        
+        return {
+            "success": True,
+            "data": claim
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving claim: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/claims/{claim_id}", 
+         operation_id="update_claim_data_tool",
+         tags=["claims"])
+async def update_claim_endpoint(
+    request: UpdateClaimRequest,
+    claim_id: str = Path(...)
+):
+    """Update claim data"""
+    try:
+        # Convert request to dict, excluding None values
+        updates = {k: v for k, v in request.model_dump().items() if v is not None}
+        
+        if not updates:
+            raise HTTPException(status_code=400, detail="No valid fields to update")
+        
+        result = await update_claim(claim_id, updates)
+        
+        if not result:
+            raise HTTPException(status_code=404, detail="Claim not found or update failed")
+        
+        return {
+            "success": True,
+            "message": "Claim updated successfully",
+            "data": result
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating claim {claim_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.patch("/api/users/{user_id}", 
+          operation_id="update_user_profile_tool",
+          tags=["users"])
+async def update_user_profile_endpoint(
+    request: UpdateUserRequest,
+    user_id: str = Path(...)
+):
+    """Update user profile"""
+    try:
+        # Convert request to dict, excluding None values
+        updates = {k: v for k, v in request.model_dump().items() if v is not None}
+        
+        if not updates:
+            raise HTTPException(status_code=400, detail="No valid fields to update")
+        
+        result = await update_user(user_id, updates)
+        
+        if not result:
+            raise HTTPException(status_code=404, detail="User not found or update failed")
+        
+        return {
+            "success": True,
+            "message": "User profile updated successfully",
+            "data": result
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating user {user_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.get("/api/users/{user_id}", 
+         operation_id="get_user_profile_tool",
+         tags=["users"])
+async def get_user_endpoint(user_id: str = Path(...)):
+    """Get user profile"""
+    try:
+        if not user_id.strip():
+            raise HTTPException(status_code=400, detail="Invalid user_id")
+        
+        user = await get_user_by_id(user_id)
+        
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        return {
+            "success": True,
+            "data": user
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving user: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/agents/status", tags=["system"])
+async def get_agents_status():
+    """Get agent service status"""
+    try:
+        return await ai_agent_service.get_status()
+    except Exception as e:
+        logger.error(f"Error getting agent status: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/health", tags=["system"])
+async def health_check():
+    """Health check endpoint"""
+    return {"status": "healthy", "timestamp": time.time()}
+
+
+if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(
+        app,
+        host="127.0.0.1",  # Listen on localhost only
+        port=8000,
+        reload=False,  # Set to False when running as module
+        log_level="info"
+    )

@@ -1,0 +1,156 @@
+{
+  "name": "create_claim_tool",
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Create Claim Tool",
+    "description": "Tool for creating legal claim data to the database using Prisma ORM",
+    "version": "2.0.0"
+  },
+  "servers": [
+    { "url": "https://b23c85f946cd.ngrok-free.app" }
+  ],
+  "auth": [],
+  "paths": {
+    "/api/claims": {
+      "post": {
+        "description": "Create a new claim with all necessary details and relationships",
+        "operationId": "create_claim_tool",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "description": "Brief title for the claim"
+                  },
+                  "description": {
+                    "type": "string",
+                    "description": "Detailed description of the claim"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": ["PENDING_INFORMATION", "UNDER_REVIEW", "PENDING_DOCUMENTS", "INVESTIGATION", "PRE_SUIT", "PRE_LITIGATION", "LITIGATION", "RESOLVED_AND_CLOSED"],
+                    "default": "PENDING_INFORMATION"
+                  },
+                  "injured": {
+                    "type": "boolean",
+                    "description": "Whether the user was injured"
+                  },
+                  "healthInsurance": {
+                    "type": "boolean",
+                    "description": "Whether the user has health insurance"
+                  },
+                  "userId": {
+                    "type": "string",
+                    "description": "ID of the user creating the claim"
+                  },
+                  "relationship": {
+                    "type": "string",
+                    "enum": ["Self", "Parent", "Child", "Sibling", "Friend", "Representative", "Other"],
+                    "description": "Relationship to the injured party"
+                  },
+                  "otherRelationship": {
+                    "type": "string",
+                    "description": "Specify if relationship is 'Other'"
+                  },
+                  "healthInsuranceNumber": {
+                    "type": "string",
+                    "description": "Health insurance number if applicable"
+                  },
+                  "isOver65": {
+                    "type": "boolean",
+                    "description": "Whether the user is over 65 years old"
+                  },
+                  "incident": {
+                    "type": "object",
+                    "description": "Details about the incident",
+                    "properties": {
+                      "datetime": {
+                        "type": "string",
+                        "format": "date-time",
+                        "description": "When the incident occurred"
+                      },
+                      "location": {
+                        "type": "string",
+                        "description": "Where the incident occurred"
+                      },
+                      "description": {
+                        "type": "string",
+                        "description": "Detailed description of the incident"
+                      },
+                      "reportNumber": {
+                        "type": "string",
+                        "description": "Police report number if available"
+                      },
+                      "reportCompleted": {
+                        "type": "boolean",
+                        "description": "Whether an accident report was filed"
+                      },
+                      "policeReportCompleted": {
+                        "type": "boolean",
+                        "description": "Whether a police report was filed"
+                      },
+                      "workRelated": {
+                        "type": "boolean",
+                        "description": "Whether the incident was work-related"
+                      },
+                      "supportingDocument": {
+                        "type": "boolean",
+                        "description": "Whether pictures were taken"
+                      },
+                      "witness": {
+                        "type": "boolean",
+                        "description": "Whether there were witnesses to the incident"
+                      },
+                      "priorRepresentation": {
+                        "type": "boolean",
+                        "description": "Whether user currently has legal representation"
+                      },
+                      "lostEarning": {
+                        "type": "string",
+                        "description": "Information about missed time from work or school"
+                      }
+                    },
+                    "required": ["datetime", "location", "description"]
+                  }
+                },
+                "required": ["title", "description", "incident", "userId"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Claim created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "message": { "type": "string" },
+                    "claim_id": { "type": "string" },
+                    "status": { "type": "string" },
+                    "created_at": { "type": "string", "format": "date-time" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "404": {
+            "description": "User not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    }
+  }
+}

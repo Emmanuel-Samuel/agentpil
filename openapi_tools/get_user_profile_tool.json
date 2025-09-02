@@ -1,0 +1,108 @@
+{
+  "name": "get_user_profile_tool",
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Get User Profile Tool",
+    "description": "Tool for retrieving user profile information from the database using Prisma ORM",
+    "version": "2.0.0"
+  },
+  "servers": [
+    { "url": "https://b23c85f946cd.ngrok-free.app" }
+  ],
+  "auth": [],
+  "paths": {
+    "/api/users/{user_id}": {
+      "get": {
+        "description": "Retrieve a user's profile information by ID",
+        "operationId": "get_user_profile_tool",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "ID of the user to retrieve profile for"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved user profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "id": { "type": "string" },
+                        "externalId": { "type": "string" },
+                        "email": { 
+                          "type": "string",
+                          "format": "email"
+                        },
+                        "firstName": { "type": "string" },
+                        "lastName": { "type": "string" },
+                        "phoneNumber": { "type": "string" },
+                        "dateOfBirth": { 
+                          "type": "string",
+                          "format": "date"
+                        },
+                        "address": {
+                          "type": "object",
+                          "properties": {
+                            "street": { "type": "string" },
+                            "city": { "type": "string" },
+                            "state": { "type": "string" },
+                            "postalCode": { "type": "string" },
+                            "country": { "type": "string" }
+                          }
+                        },
+                        "preferences": {
+                          "type": "object",
+                          "properties": {
+                            "notificationsEnabled": { "type": "boolean" },
+                            "language": { "type": "string" },
+                            "timezone": { "type": "string" }
+                          }
+                        },
+                        "createdAt": { 
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": { 
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "User not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": false },
+                    "error": { "type": "string", "example": "User not found" }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    }
+  }
+}

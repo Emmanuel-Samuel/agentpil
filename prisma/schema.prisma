@@ -1,0 +1,852 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+generator py {
+  provider = "prisma-client-py"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum WereYouInjured {
+  Yes // Yes, I was Injured
+  Someone // No, Someone else was Injured
+  No // No Injuries
+}
+
+enum MaritalStatus {
+  Single
+  Married
+  Divorced
+  Separated
+}
+
+enum EmploymentStatus {
+  Employed
+  Self_Employed
+  Student
+  Unemployed
+}
+
+enum ClaimStatus {
+  PENDING_INFORMATION @map("Pending Information")
+  UNDER_REVIEW        @map("Under Review")
+  PENDING_DOCUMENTS   @map("Pending Documents")
+  INVESTIGATION       @map("Investigation")
+  PRE_SUIT            @map("Pre-Suit")
+  PRE_LITIGATION      @map("Pre-Litigation")
+  LITIGATION          @map("Litigation")
+  RESOLVED_AND_CLOSED @map("Resolved and Closed")
+}
+
+enum Relationship {
+  Self
+  Parent
+  Child
+  Sibiling
+  Friend
+  Representative
+  Other
+}
+
+enum InjuryPoint {
+  Shoulder
+  Elbow
+  Leg
+  Knee
+  Hip_Pelvic
+  Arm
+  Wrist
+  Thigh
+  Ankle
+  Finger
+  Toe
+  Hand
+  Foot
+  Other
+}
+
+enum InjurySide {
+  Left
+  Right
+  Both
+}
+
+enum InjuryType {
+  Laceration
+  Contusion_Bruises
+  Broken
+  Fracture
+  Tear
+  Sprain
+  Other
+}
+
+enum driverOrPassenger {
+  Driver
+  Passenger
+}
+
+enum BusOrVehicle {
+  Passenger
+  Other_Vehicle
+}
+
+enum TransportType {
+  Bus
+  Train
+}
+
+enum PropertyType {
+  Business
+  Private_Property
+}
+
+enum DefendantRole {
+  Operator
+  Owner
+  Operator_Owner
+  MTA
+  AVIATION
+  EMPLOYER
+  SUPERVISOR
+  PROPERTY_OWNER
+  TRAIN
+  Other
+}
+
+enum CollisionType {
+  HEAD_ON     @map("Head-On Collision")
+  REAR_END    @map("Rear-End Collision")
+  SIDE_IMPACT @map("Side-Impact Collision")
+  SIDESWIPE   @map("Sideswipe Collision")
+}
+
+enum MedCare {
+  Medicare
+  Medicaid
+  Unemployment
+  Social_Security_Benefits
+}
+
+enum QuestionType {
+  TEXTFIELD
+  DATE
+  SELECTMENU
+  YESNO
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+// KANBAN MODELS
+model Project {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  ownerId       String
+  owner         User           @relation("ProjectOwner", fields: [ownerId], references: [id])
+  boards        Board[]
+  projectClaims ProjectClaim[]
+
+  // Many to many relationships
+  projectAccounts ProjectAccount[]
+  projectUsers    ProjectUser[]
+
+  @@index([ownerId])
+}
+
+// Join table for Project-User many-to-many relationship
+model ProjectUser {
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation("ProjectAssignee", fields: [userId], references: [id], onDelete: Cascade)
+
+  assignedAt DateTime @default(now())
+
+  @@id([projectId, userId])
+  @@index([userId])
+}
+
+// Join table for Project-Account many-to-many relationship
+model ProjectAccount {
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  accountId String
+  account   Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  assignedAt DateTime @default(now())
+
+  @@id([projectId, accountId])
+  @@index([accountId])
+}
+
+model Board {
+  id          String   @id @default(uuid())
+  title       String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  columns   Column[]
+
+  @@index([projectId])
+}
+
+model Column {
+  id          String   @id @default(uuid())
+  title       String
+  description String?
+  order       Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  boardId String
+  board   Board  @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  tasks   Task[]
+
+  @@index([boardId])
+}
+
+model Task {
+  id          String       @id @default(uuid())
+  title       String
+  description String?
+  priority    TaskPriority @default(MEDIUM) @map("Task Priority")
+  dueDate     DateTime?    @map("Due Date")
+  status      String       @default("To Do") @map("Task Status")
+  position    Int          @default(0) @map("Task Position")
+  archive     Boolean      @default(false)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  columnId String
+  column   Column @relation(fields: [columnId], references: [id], onDelete: Cascade)
+
+  createdById String
+  createdBy   User   @relation("TaskCreator", fields: [createdById], references: [id])
+
+  taskAccounts  TaskAccount[]
+  taskAssignees TaskAssignee[]
+  comments      TaskComment[]
+  attachments   TaskAttachment[]
+  labels        TaskLabel[]
+
+  // One-to-many relationship with Claim
+  claim   Claim?  @relation(fields: [claimId], references: [id])
+  claimId String?
+
+  @@index([columnId])
+  @@index([createdById])
+  @@index([claimId])
+}
+
+model TaskAccount {
+  taskId String
+  task   Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  accountId String
+  account   Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  assignedAt DateTime @default(now())
+
+  @@id([taskId, accountId])
+  @@index([accountId])
+}
+
+model TaskAssignee {
+  taskId String
+  task   Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation("TaskAssignee", fields: [userId], references: [id], onDelete: Cascade)
+
+  assignedAt DateTime @default(now())
+
+  @@id([taskId, userId])
+  @@index([userId])
+}
+
+//
+model TaskComment {
+  id        String   @id @default(uuid())
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  taskId String
+  task   Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation("TaskCommentAuthor", fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// Task Attachment
+model TaskAttachment {
+  id           String   @id @default(uuid())
+  fileName     String   @map("File Name")
+  originalName String   @map("Original File Name")
+  s3Key        String   @map("S3 Object Key")
+  s3Bucket     String   @map("S3 Bucket Name")
+  fileSize     Int      @map("File Size (bytes)")
+  mimeType     String   @map("MIME Type")
+  uploadedAt   DateTime @default(now())
+
+  // Optional metadata for better file management
+  isPublic Boolean @default(false) @map("Public Access")
+  etag     String? @map("S3 ETag")
+  checksum String? @map("File Checksum")
+
+  // Relationships
+  taskId String
+  task   Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  uploadedById String
+  uploadedBy   User   @relation("TaskAttachmentUploader", fields: [uploadedById], references: [id])
+
+  @@unique([s3Bucket, s3Key])
+  @@index([taskId])
+  @@index([uploadedById])
+  @@index([s3Key])
+}
+
+// Task Label
+
+model TaskLabel {
+  taskId String
+  task   Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  labelId String
+  label   Label  @relation(fields: [labelId], references: [id], onDelete: Cascade)
+
+  assignedAt DateTime @default(now())
+
+  @@id([taskId, labelId])
+  @@index([labelId])
+}
+
+// Label
+model Label {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  colour      String   @default("#6B7280") @map("Label Colour")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relationships
+  createdById String
+  createdBy   User   @relation("LabelCreator", fields: [createdById], references: [id])
+
+  taskLabels TaskLabel[]
+
+  @@index([createdById])
+}
+
+// Added the projectowner, taskscreated, task assignments
+model User {
+  id                        String         @id @default(uuid())
+  firstName                 String
+  middleName                String?
+  lastName                  String
+  injured                   WereYouInjured
+  email                     String         @unique
+  phone                     String         @unique
+  password                  String
+  phone2                    String?
+  gender                    String?
+  dateOfBirth               DateTime?
+  isUnder18                 Boolean        @default(false)
+  fatherFirstName           String?
+  fatherLastName            String?
+  motherFirstName           String?
+  motherLastName            String?
+  mailingAddress1           String?
+  mailingAddress2           String?
+  mailingCity               String?
+  mailingState              String?
+  mailingZipCode            String?
+  isPOBoxOrDifferentAddress Boolean?       @default(false)
+  physicalAddress1          String?
+  physicalAddress2          String?
+  physicalCity              String?
+  physicalState             String?
+  physicalZipCode           String?
+  maritalStatus             String?
+  spouseFirstName           String?
+  spouseLastName            String?
+  spousePhone               String?
+  employmentStatus          String?
+  employerName              String?
+  employerTitle             String?
+  employmentType            String?
+  pay                       String?
+  schoolName                String?
+  expectedGraduationYear    String?
+  role                      UserRole       @default(USER)
+  isVerified                Boolean        @default(false)
+  verificationCode          String?
+  source                    Source?        @relation(fields: [sourceId], references: [id])
+  sourceId                  String?
+  claims                    Claim[]
+  createdAt                 DateTime       @default(now())
+  updatedAt                 DateTime       @updatedAt
+  verify                    Verify?
+  claimlist                 ClaimList      @relation(fields: [claimlistId], references: [id])
+  claimlistId               String
+  accountSync               String?
+
+  projectsOwned      Project[]      @relation("ProjectOwner")
+  tasksCreated       Task[]         @relation("TaskCreator")
+  taskAssignments    TaskAssignee[] @relation("TaskAssignee")
+  projectAssignments ProjectUser[]  @relation("ProjectAssignee")
+
+  taskComments    TaskComment[]    @relation("TaskCommentAuthor")
+  labelsCreated   Label[]          @relation("LabelCreator")
+  taskAttachments TaskAttachment[] @relation("TaskAttachmentUploader")
+
+  @@index([claimlistId])
+}
+
+model Verify {
+  id           String   @id @default(uuid())
+  token        String
+  url          String
+  status       String   @default("pending")
+  sessionId    String?
+  errorCode    String?
+  errorMessage String?
+  updatedAt    DateTime @updatedAt
+  createdAt    DateTime @default(now())
+  User         User     @relation(fields: [userId], references: [id])
+  userId       String   @unique
+
+  @@index([userId])
+}
+
+model Claim {
+  id                    String        @id @default(uuid())
+  status                ClaimStatus?  @default(PENDING_INFORMATION) @map("Status")
+  injured               Boolean?      @map("Were you injured?")
+  relationship          Relationship? @map("Relationship")
+  otherRelationship     String?       @map("Other Relationship")
+  healthInsurance       Boolean?      @map("Do you have health insurance?")
+  healthInsuranceNumber String?       @map("Health Insurance Number")
+  isOver65              Boolean?      @map("Are you 65 years old or older?")
+  receiveMedicare       String[]      @map("Do you currently receive?")
+  assignedCaseManager   String?       @map("Assigned Claim Specialist")
+
+  // Relationship
+  user                      User                @relation(fields: [userId], references: [id])
+  userId                    String
+  clientRole                Role?               @relation("ClientRole", fields: [clientRoleId], references: [id])
+  clientRoleId              String?
+  injuredPartyRole          Role?               @relation("InjuredPartyRole", fields: [injuredPartyRoleId], references: [id])
+  injuredPartyRoleId        String?
+  incident                  Incident?           @relation(fields: [incidentId], references: [id])
+  incidentId                String?             @unique
+  healthInsuranceProvider   Role?               @relation("HealthInsuranceProvider", fields: [healthInsuranceProviderId], references: [id])
+  healthInsuranceProviderId String?
+  witness                   Witness?
+  defendant                 Defendant?
+  treatmentsAndInjuries     TreatmentAndInjury?
+  questionnaire             Questionnaire?
+  claimlist                 ClaimList           @relation(fields: [claimlistId], references: [id])
+  claimlistId               String
+  envelop                   Envelop[]
+  media                     AccidentMedia[]
+  createdAt                 DateTime            @default(now())
+  updatedAt                 DateTime            @updatedAt
+
+  // One to many relationship for Project
+  // project   Project? @relation(fields: [projectId], references: [id])
+  // projectId String?
+
+  // One to many relationship for Task
+  tasks Task[]
+
+  projectClaims ProjectClaim[]
+
+  // @@index([projectId])
+}
+
+// Join table for Project-Claim many-to-many relationship
+model ProjectClaim {
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  claimId String
+  claim   Claim  @relation(fields: [claimId], references: [id], onDelete: Cascade)
+
+  assignedAt DateTime @default(now())
+
+  @@id([projectId, claimId])
+  @@index([claimId])
+}
+
+model Envelop {
+  id           String   @id @default(uuid())
+  // name      String
+  status       Boolean  @default(false)
+  claim        Claim    @relation(fields: [claimId], references: [id])
+  claimId      String
+  submitterUrl String?
+  submitterId  Int?
+  submittedUrl String?
+  createdAt    DateTime @default(now())
+}
+
+// model Template {
+//   id           String   @id @default(uuid())
+//   submitterUrl String
+//   submitterId  String
+//   submittedUrl String?
+//   name         String
+//   // slug        String
+//   createdAt    DateTime @default(now())
+//   envelop      Envelop  @relation(fields: [envelopId], references: [id])
+//   envelopId    String   @unique
+// }
+
+model ClaimList {
+  id         String     @id @default(uuid())
+  name       String
+  enable     Boolean?
+  claim      Claim[]
+  user       User[]
+  question   Question[]
+  questionId String?
+  createdAt  DateTime   @default(now())
+  createdBy  String?
+}
+
+model Source {
+  id        String   @id @default(uuid())
+  name      String
+  createdAt DateTime @default(now())
+  createdBy String?
+  enable    Boolean?
+  user      User[]
+}
+
+model Questionnaire {
+  id       String           @id @default(uuid())
+  claim    Claim            @relation(fields: [claimId], references: [id])
+  claimId  String           @unique
+  question QuestionAnswer[]
+}
+
+model QuestionAnswer {
+  id              String         @id @default(uuid())
+  Questionnaire   Questionnaire? @relation(fields: [questionnaireId], references: [id])
+  questionnaireId String?
+  question        Question       @relation(fields: [questionId], references: [id])
+  questionId      String
+  answer          String
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([questionnaireId])
+  @@index([questionId])
+}
+
+model Question {
+  id             String           @id @default(uuid()) // can i set to auto generate?
+  question       String           @map("Question")
+  claimList      ClaimList?       @relation(fields: [claimListId], references: [id])
+  claimListId    String?
+  type           QuestionType     @map("Question type")
+  enable         Boolean          @default(false) @map("Active")
+  choices        Choice[]
+  QuestionAnswer QuestionAnswer[]
+
+  @@index([claimListId])
+}
+
+model Choice {
+  id         String   @id @default(uuid())
+  text       String   @map("Choice Text")
+  question   Question @relation(fields: [questionId], references: [id])
+  questionId String
+
+  @@index([questionId])
+}
+
+model Defendant {
+  id               String             @id @default(uuid())
+  claim            Claim              @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  claimId          String             @unique
+  defendantDetails DefendantDetails[]
+}
+
+model DefendantDetails {
+  id                          String         @id @default(uuid())
+  defendantRole               DefendantRole  @map("Defendant Role")
+  defendantAccount            Role           @relation("DefendantAccount", fields: [defendantAccountId], references: [id], onDelete: Cascade)
+  defendantAccountId          String
+  defendantInsuranceCarrier   Role?          @relation("InsuranceCarrier", fields: [defendantInsuranceCarrierId], references: [id])
+  defendantInsuranceCarrierId String?
+  insurancePolicyNumber       String?        @map("Defendant Policy Number")
+  driverLicenseNumber         String?        @map("Driver License Number")
+  driverLicenseState          String?        @map("Driver License State")
+  vehicleMake                 String?        @map("Vehicle Make")
+  vehicleModel                String?        @map("Vehicle Model")
+  vehicleYear                 String?        @map("Vehicle Year")
+  vehicleColor                String?        @map("Vehicle Color")
+  vehiclePlate                String?        @map("Vehicle Plate Number")
+  vehiclePosition             String?        @map("Vehicle Position")
+  vehicleRegisteredState      String?        @map("Vehicle Registered State")
+  collisionType               CollisionType? @map("Collision Type")
+  supervisorName              String?        @map("Supervisor Name")
+  supervisorContact           String?        @map("Supervisor Contact")
+  client                      Boolean        @default(false)
+  groupId                     String?
+  sort                        Int            @default(0)
+
+  defendant   Defendant @relation(fields: [defendantId], references: [id])
+  defendantId String
+
+  @@index([defendantId])
+  @@index([groupId])
+}
+
+// model HealthInsuranceProvider {
+//   id     String @id @default(uuid())
+//   claim  Claim?
+//   role   Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+//   roleId String
+// }
+
+model TreatmentAndInjury {
+  id          String    @id @default(uuid())
+  claim       Claim     @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  claimId     String    @unique
+  treatment   Treatment @relation(fields: [treatmentId], references: [id], onDelete: Cascade)
+  treatmentId String    @unique // One treatment
+
+  @@index([claimId])
+}
+
+model Treatment {
+  id                    String              @id @default(uuid())
+  takenHospital         Boolean             @map("Taken Hospital?")
+  isCurrentlyTreated    Boolean             @map("Currently Treated?")
+  role                  Role?               @relation("HospitalRole", fields: [hospitalId], references: [id])
+  hospitalId            String?
+  doctor                Role?               @relation("DoctorRole", fields: [doctorId], references: [id])
+  doctorId              String?
+  admission             DateTime?           @map("Date of Admission")
+  discharge             DateTime?           @map("Date of Discharge")
+  injuries              Injury[]
+  lastVisit             DateTime?           @map("Last Visit")
+  otherInjuries         String?             @map("Other Injuries")
+  treatmentsAndInjuries TreatmentAndInjury?
+
+  @@index([hospitalId])
+  @@index([doctorId])
+}
+
+model Injury {
+  id                 String      @id @default(uuid())
+  injuryLocation     InjuryPoint @map("Injury Location")
+  injury             InjuryType  @map("Injury")
+  injuryLocationSide InjurySide  @map("Injury Location Side")
+  other              String?     @map("Other")
+  treatment          Treatment   @relation(fields: [treatmentId], references: [id], onDelete: Cascade)
+  treatmentId        String
+
+  @@index([treatmentId])
+}
+
+model AccidentMedia {
+  id        String  @id @default(uuid())
+  url       String  @map("MediaURL")
+  type      String  @map("MediaType")
+  thumbnail String? @map("ThumbnailURL")
+  claim     Claim   @relation(fields: [claimId], references: [id])
+  claimId   String
+
+  @@index([claimId])
+}
+
+model Incident {
+  id                    String         @id @default(uuid())
+  vehicleRole           String?        @map("Were you the driver or passenger in the vehicle?")
+  vehicleCount          Int?           @map("How many vehicles were involved?")
+  busOrVehicle          BusOrVehicle?  @map("Bus passenger or other vehicle?")
+  transportType         TransportType? @map("Bus or train?")
+  rideShareCompany      String?        @map("Ride sharing company")
+  rideShareOtherName    String?        @map("Other ride sharing company name")
+  propertyType          PropertyType?  @map("Business or private property?")
+  datetime              DateTime       @map("Date of Accident")
+  location              String?        @map("Incident Location")
+  workRelated           Boolean        @map("Were you at work at the time of the accident?")
+  description           String?        @map("Description of Accident")
+  policeReportCompleted Boolean        @map("Was a Police Report Filed")
+
+  // Police Station relationship 
+  policeStation   Role?   @relation("PoliceStationRole", fields: [policeStationId], references: [id])
+  policeStationId String?
+
+  // Police Officer relationship - direct SubAccount reference
+  policeOfficer             SubAccount? @relation("IncidentPoliceOfficer", fields: [policeOfficerId], references: [id])
+  policeOfficerId           String?
+  reportCompleted           Boolean     @map("Was an Accident Report or Complaint Report Filed")
+  reportNumber              String?     @map("Accident/Complaint Report Number")
+  supportingDocument        Boolean     @map("Picture Taken?")
+  lostEarning               String      @map("Missed time from work or school?")
+  amountLoss                String?     @map("Approximate Loss of Earning")
+  timeLoss                  String?     @map("Approximate Missed Time from School? (If in school)")
+  witness                   Boolean     @map("Any witnesses to the incident?")
+  priorRepresentation       Boolean     @map("Do you currently have representation regarding this claim?")
+  priorRepresentationReason String?     @map("Reason for removing current representation")
+
+  // Law firm relationship (attorney is SubAccount of law firm Account)
+  lawfirm   Role?   @relation("LawfirmRole", fields: [lawfirmId], references: [id])
+  lawfirmId String?
+
+  // Attorney relationship - direct SubAccount reference
+  attorney   SubAccount? @relation("IncidentAttorney", fields: [attorneyId], references: [id])
+  attorneyId String?
+
+  Claim Claim?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([lawfirmId])
+  @@index([attorneyId])
+  @@index([policeStationId])
+  @@index([policeOfficerId])
+}
+
+model Witness {
+  id      String @id @default(uuid())
+  claim   Claim  @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  claimId String @unique
+
+  witnessDetails WitnessDetails[]
+}
+
+model WitnessDetails {
+  id        String  @id @default(uuid())
+  witness   Witness @relation(fields: [witnessId], references: [id], onDelete: Cascade)
+  witnessId String
+  role      Role    @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  roleId    String  @unique
+
+  @@index([witnessId])
+}
+
+model Role {
+  id                        String             @id @default(uuid())
+  account                   Account?           @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  accountId                 String?
+  roletype                  RoleType           @relation(fields: [roletypeId], references: [id])
+  roletypeId                String
+  clientClaims              Claim[]            @relation("ClientRole")
+  injuredPartyClaims        Claim[]            @relation("InjuredPartyRole")
+  healthInsuranceClaims     Claim[]            @relation("HealthInsuranceProvider")
+  witnessDetails            WitnessDetails?
+  defendantAccount          DefendantDetails[] @relation("DefendantAccount")
+  defendantInsuranceCarrier DefendantDetails[] @relation("InsuranceCarrier")
+  hospitalTreatments        Treatment[]        @relation("HospitalRole")
+  doctorTreatments          Treatment[]        @relation("DoctorRole")
+  lawfirmIncidents          Incident[]         @relation("LawfirmRole")
+  policeStationIncidents    Incident[]         @relation("PoliceStationRole")
+
+  @@index([accountId, roletypeId])
+}
+
+model RoleType {
+  id        String   @id @default(uuid())
+  roleType  String   @unique
+  createdAt DateTime @default(now())
+  createdBy String?
+  enable    Boolean?
+
+  // Relationship
+  Role Role[]
+
+  @@index([roleType])
+}
+
+model Account {
+  id                       String       @id @default(uuid())
+  firstName                String?      @map("First Name")
+  lastName                 String?      @map("Last Name")
+  email                    String?      @map("Email Address")
+  phone                    String?      @map("Phone")
+  phone2                   String?      @map("Secondary Phone")
+  fax                      String?      @map("Fax Number")
+  mailingAddress           String?      @map("Mailing Address Street")
+  mailingAddressBuilding   String?      @map("Mailing Address Building")
+  mailingCity              String?      @map("Mailing City")
+  mailingState             String?      @map("Mailing State")
+  mailingZipCode           String?      @map("Mailing Zip Code")
+  billingAddressStreet     String?      @map("Billing Address Street")
+  billingAddressBuilding   String?      @map("Billing Address Building")
+  billingAddressCity       String?      @map("Billing Address City")
+  billingAddressState      String?      @map("Billing Address State")
+  billingAddressPostalCode String?      @map("Billing Zip Code")
+  website                  String?      @map("Website")
+  enable                   Boolean?     @default(false)
+  createdAt                DateTime     @default(now())
+  updatedAt                DateTime     @updatedAt
+  // Relationship
+  Role                     Role[]
+  subAccount               SubAccount[]
+
+  // New relationship
+  projectAccounts ProjectAccount[]
+  taskAccounts    TaskAccount[]
+}
+
+model SubAccount {
+  id        String   @id @default(uuid())
+  firstName String?  @map("First Name")
+  lastName  String?  @map("Last Name")
+  phone     String?  @map("Phone")
+  account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  accountId String
+  enable    Boolean? @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  incidents       Incident[] @relation("IncidentAttorney")
+  policeIncidents Incident[] @relation("IncidentPoliceOfficer")
+}
+
+model Car {
+  id    String @id @default(uuid())
+  make  String
+  model String
+  year  String
+}

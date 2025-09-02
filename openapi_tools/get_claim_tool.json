@@ -1,0 +1,104 @@
+{
+  "name": "get_claim_tool",
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Get Claim Tool",
+    "description": "Tool for retrieving detailed information about a specific claim. Used by claim continuation agents to identify missing fields and guide the conversation.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    { "url": "https://b23c85f946cd.ngrok-free.app" }
+  ],
+  "auth": [],
+  "paths": {
+    "/api/claims/{claim_id}": {
+      "get": {
+        "description": "Retrieve detailed information about a specific claim. Used by claim continuation agents to identify missing fields and guide the conversation.",
+        "operationId": "get_claim_tool",
+        "parameters": [
+          {
+            "name": "claim_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "ID of the claim to retrieve"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved claim details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "id": { "type": "string" },
+                        "title": { "type": "string" },
+                        "description": { "type": "string" },
+                        "status": { 
+                          "type": "string",
+                          "enum": ["PENDING_INFORMATION", "UNDER_REVIEW", "PENDING_DOCUMENTS", "INVESTIGATION", "PRE_SUIT", "PRE_LITIGATION", "LITIGATION", "RESOLVED_AND_CLOSED"]
+                        },
+                        "created_at": { "type": "string", "format": "date-time" },
+                        "updated_at": { "type": "string", "format": "date-time" },
+                        "assigned_case_manager": { "type": "string" },
+                        "injured": { "type": "boolean" },
+                        "health_insurance": { "type": "boolean" },
+                        "relationship": { 
+                          "type": "string",
+                          "enum": ["Self", "Parent", "Child", "Sibling", "Friend", "Representative", "Other"]
+                        },
+                        "other_relationship": { "type": "string" },
+                        "health_insurance_number": { "type": "string" },
+                        "is_over_65": { "type": "boolean" },
+                        "receive_medicare": {
+                          "type": "array",
+                          "items": { "type": "string" }
+                        },
+                        "incident": {
+                          "type": "object",
+                          "properties": {
+                            "datetime": { "type": "string", "format": "date-time" },
+                            "location": { "type": "string" },
+                            "description": { "type": "string" },
+                            "policeReportNumber": { "type": "string" },
+                            "injuries": {
+                              "type": "array",
+                              "items": { "type": "string" }
+                            },
+                            "workRelated": { "type": "boolean" }
+                          }
+                        },
+                        "user": {
+                          "type": "object",
+                          "properties": {
+                            "id": { "type": "string" },
+                            "name": { "type": "string" },
+                            "email": { "type": "string" },
+                            "phone": { "type": "string" }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Claim not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    }
+  }
+}

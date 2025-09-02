@@ -1,0 +1,152 @@
+{
+  "name": "update_claim_data_tool",
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Update Claim Data Tool",
+    "description": "Tool for updating existing claim data. Supports both incremental (single field) and bulk (multiple fields) updates.",
+    "version": "3.0.0"
+  },
+  "servers": [
+    { "url": "https://b23c85f946cd.ngrok-free.app" }
+  ],
+  "auth": [],
+  "paths": {
+    "/api/claims/{claim_id}": {
+      "put": {
+        "description": "Update an existing claim with one or more fields. Only provided fields will be updated.",
+        "operationId": "update_claim_data_tool",
+        "parameters": [
+          {
+            "name": "claim_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "ID of the claim to update"
+          }
+        ],
+        "requestBody": {
+          "description": "Fields to update. Include only the fields you want to change. All fields are optional.",
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": ["PENDING_INFORMATION", "UNDER_REVIEW", "PENDING_DOCUMENTS", "INVESTIGATION", "PRE_SUIT", "PRE_LITIGATION", "LITIGATION", "RESOLVED_AND_CLOSED"],
+                    "description": "Current status of the claim"
+                  },
+                  "injured": {
+                    "type": "boolean",
+                    "description": "Whether the user was injured"
+                  },
+                  "relationship": {
+                    "type": "string",
+                    "enum": ["Self", "Parent", "Child", "Sibling", "Friend", "Representative", "Other"],
+                    "description": "Relationship to the injured party"
+                  },
+                  "otherRelationship": {
+                    "type": "string",
+                    "description": "Specify if relationship is 'Other'"
+                  },
+                  "healthInsurance": {
+                    "type": "boolean",
+                    "description": "Whether the user has health insurance"
+                  },
+                  "healthInsuranceNumber": {
+                    "type": "string",
+                    "description": "Health insurance number if applicable"
+                  },
+                  "isOver65": {
+                    "type": "boolean",
+                    "description": "Whether the user is over 65 years old"
+                  },
+                  "receiveMedicare": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Medicare benefits currently received"
+                  },
+                  "assignedCaseManager": {
+                    "type": "string",
+                    "description": "Assigned case manager or specialist"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Claim updated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "message": { "type": "string" },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "id": { "type": "string" },
+                        "title": { "type": "string" },
+                        "description": { "type": "string" },
+                        "status": { "type": "string" },
+                        "injured": { "type": "boolean" },
+                        "relationship": { "type": "string" },
+                        "otherRelationship": { "type": "string" },
+                        "healthInsurance": { "type": "boolean" },
+                        "healthInsuranceNumber": { "type": "string" },
+                        "isOver65": { "type": "boolean" },
+                        "assignedCaseManager": { "type": "string" },
+                        "incident": {
+                          "type": "object",
+                          "properties": {
+                            "datetime": { "type": "string", "format": "date-time" },
+                            "location": { "type": "string" },
+                            "description": { "type": "string" },
+                            "witnesses": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "name": { "type": "string" },
+                                  "phone": { "type": "string" }
+                                }
+                              }
+                            },
+                            "policeReportNumber": { "type": "string" },
+                            "workRelated": { "type": "boolean" }
+                          }
+                        },
+                        "createdAt": { "type": "string", "format": "date-time" },
+                        "updatedAt": { "type": "string", "format": "date-time" }
+                      }
+                    },
+                    "updated_fields": {
+                      "type": "array",
+                      "items": { "type": "string" },
+                      "description": "List of fields that were updated"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No fields provided for update"
+          },
+          "404": {
+            "description": "Claim not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    }
+  }
+}

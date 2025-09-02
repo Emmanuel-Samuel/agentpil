@@ -1,189 +1,201 @@
-import asyncio
 import json
 import logging
-from typing import Dict, List, Optional, Any
-from azure.ai.agents import AgentsClient
-from azure.identity import DefaultAzureCredential
-from azure.core.exceptions import HttpResponseError
-from pathlib import Path
-from ..config import settings
+import time
+import asyncio
+from typing import Dict, Any, Optional
+from azure.identity.aio import DefaultAzureCredential
+from azure.ai.projects.aio import AIProjectClient
+from azure.ai.agents.models import MessageRole, ListSortOrder
+
+from ..config.config import settings
 
 logger = logging.getLogger(__name__)
 
 class AIAgentService:
-    """Service for managing AI agents using Azure AI Foundry."""
+    """Simplified Azure AI Foundry agent service"""
     
     def __init__(self):
+        self.credential = DefaultAzureCredential()
+        self.project_client = None
+        self.agents_client = None
+        self._connected = False
+    
+    async def initialize(self):
+        """Initialize the Azure AI Project client"""
         try:
-            self.credential = DefaultAzureCredential()
-            
-            # Initialize the Agents client
-            self.agents_client = AgentsClient(
-                endpoint=settings.AZURE_AI_FOUNDRY_ENDPOINT,
-                credential=self.credential
-            )
-            
-            # Store agent IDs (not instances, as agents are deployed separately)
-            self.agent_ids: Dict[str, str] = {}
-            self.threads: Dict[str, str] = {}  # user_id -> thread_id mapping
-            
-            # Use deployment model name from settings
-            self.deployment_model_name = settings.AZURE_AI_FOUNDRY_DEPLOYMENT_MODEL_NAME
-            
-            logger.info("AIAgentService initialized successfully")
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize AIAgentService: {str(e)}")
-            raise
-
-    async def create_or_get_agent(self, agent_name: str, instructions: str, model: Optional[str] = None) -> str:
-        """Get agent ID from environment or create new agent."""
-        try:
-            # Check if agent ID is already cached
-            if agent_name in self.agent_ids:
-                logger.info(f"Using cached agent ID for: {agent_name}")
-                return self.agent_ids[agent_name]
-            
-            # Try to get agent ID from environment variables
-            agent_id_env_var = f"{agent_name.upper()}_ID"
-            if hasattr(settings, agent_id_env_var):
-                agent_id = getattr(settings, agent_id_env_var)
-                if agent_id:
-                    self.agent_ids[agent_name] = agent_id
-                    logger.info(f"Using deployed agent ID for: {agent_name}")
-                    return agent_id
-            
-            # If not found in environment, create new agent
-            logger.info(f"Creating new agent: {agent_name}")
-            try:
-                agent = self.agents_client.create_agent(
-                    name=agent_name,
-                    instructions=instructions,
-                    model=model or self.deployment_model_name,
-                    tools=[]  # Tools will be added in Phase 3
+            if not self._connected:
+                self.project_client = AIProjectClient(
+                    endpoint=settings.azure_ai_foundry_endpoint,
+                    credential=self.credential,
                 )
                 
-                self.agent_ids[agent_name] = agent.id
-                logger.info(f"Created agent {agent_name} with ID: {agent.id}")
-                return agent.id
+                await self.project_client.__aenter__()
+                self.agents_client = self.project_client.agents
+                self._connected = True
                 
-            except HttpResponseError as http_error:
-                logger.error(f"HTTP error creating agent {agent_name}: {http_error}")
-                raise
-            except Exception as e:
-                logger.error(f"Error creating agent {agent_name}: {str(e)}")
-                raise
+                logger.info("Azure AI Agent Service initialized")
                 
         except Exception as e:
-            logger.error(f"Error in create_or_get_agent for {agent_name}: {str(e)}")
+            logger.error(f"Failed to initialize Azure AI Agent Service: {str(e)}")
             raise
-
-    async def get_or_create_thread(self, user_id: str) -> str:
-        """Get or create a thread for a user."""
+    
+    async def close(self):
+        """Close the Azure AI Project client"""
         try:
-            if user_id in self.threads:
-                thread_id = self.threads[user_id]
-                logger.debug(f"Using existing thread {thread_id} for user {user_id}")
-                return thread_id
-            
-            # Create new thread
-            thread = self.agents_client.threads.create()
-            self.threads[user_id] = thread.id
-            logger.info(f"Created new thread {thread.id} for user {user_id}")
-            return thread.id
-            
+            if self._connected and self.project_client:
+                await self.project_client.__aexit__(None, None, None)
+                self._connected = False
+                logger.info("Azure AI Agent Service closed")
         except Exception as e:
-            logger.error(f"Error getting/creating thread for user {user_id}: {str(e)}")
-            raise
-
-    async def get_agent_response(
+            logger.error(f"Error closing Azure AI Agent Service: {str(e)}")
+    
+    async def chat(
         self,
-        agent_name: str,
+        message: str,
         user_id: str,
-        user_message: str,
-        chat_history: Optional[List[Dict]] = None
-    ) -> str:
-        """Get a response from an AI agent."""
+        thread_id: Optional[str] = None,
+        claim_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Unified chat method - handles all agent interactions
+        
+        Args:
+            message: User message
+            user_id: User identifier
+            thread_id: Optional existing thread ID for conversation continuity
+            claim_id: Optional claim ID for context
+            
+        Returns:
+            Response with agent message and thread info
+        """
         try:
-            # Get agent ID
-            agent_id = await self.create_or_get_agent(agent_name, "")
-            thread_id = await self.get_or_create_thread(user_id)
+            if not self._connected:
+                await self.initialize()
             
-            # Add user message to thread
-            message = self.agents_client.messages.create(
-                thread_id=thread_id,
-                role="user",
-                content=user_message
-            )
-            logger.debug(f"Created message {message.id} in thread {thread_id}")
+            if not settings.main_orchestrator_agent_id:
+                raise ValueError("MAIN_ORCHESTRATOR_AGENT_ID not configured")
             
-            # Create and run the agent
-            run = self.agents_client.runs.create(
-                thread_id=thread_id,
-                agent_id=agent_id
-            )
-            logger.debug(f"Created run {run.id} for agent {agent_id}")
-            
-            # Poll for completion
-            max_attempts = 60  # 60 seconds timeout
-            attempt = 0
-            
-            while run.status in ["queued", "in_progress", "requires_action"] and attempt < max_attempts:
-                await asyncio.sleep(1)
-                run = self.agents_client.runs.get(thread_id=thread_id, run_id=run.id)
-                attempt += 1
-                
-                if attempt % 10 == 0:  # Log every 10 seconds
-                    logger.debug(f"Run {run.id} still in progress, status: {run.status}")
-            
-            if run.status == "completed":
-                # Get the latest messages from the thread, newest first
-                messages = self.agents_client.messages.list(thread_id=thread_id, order="desc")
-                
-                # Find the first assistant message in the list (which will be the latest)
-                for message in messages:
-                    if message.role == "assistant":
-                        response_text = None
-                        # Get the content from the message
-                        if hasattr(message, 'content') and message.content:
-                            if isinstance(message.content, list) and len(message.content) > 0:
-                                content_item = message.content[0]
-                                if hasattr(content_item, 'text') and hasattr(content_item.text, 'value'):
-                                    response_text = content_item.text.value
-                                elif hasattr(content_item, 'value'):
-                                    response_text = content_item.value
-                            elif isinstance(message.content, str):
-                                response_text = message.content
-                        
-                        if response_text:
-                            logger.info(f"Agent {agent_name} responded to user {user_id}")
-                            return response_text
-                
-                logger.warning(f"No assistant message found in completed run {run.id}")
-                return "I'm sorry, I couldn't process your request at this time."
-                
-            elif run.status == "failed":
-                error_msg = getattr(run, 'last_error', 'Unknown error')
-                logger.error(f"Agent run {run.id} failed: {error_msg}")
-                return "I'm sorry, there was an error processing your request. Please try again."
+            # Create or use existing thread
+            if thread_id:
+                thread = await self.agents_client.threads.get(thread_id=thread_id)
             else:
-                logger.warning(f"Agent run {run.id} timed out with status: {run.status}")
-                return "I'm sorry, your request is taking longer than expected. Please try again."
+                thread = await self.agents_client.threads.create()
+                thread_id = thread.id
+            
+            # Create structured message with context
+            structured_message = {
+                "user_id": user_id,
+                "claim_id": claim_id,
+                "message": message
+            }
+            
+            # Add message to thread
+            await self.agents_client.messages.create(
+                thread_id=thread_id,
+                role=MessageRole.USER,
+                content=json.dumps(structured_message)
+            )
+            
+            # Create and process run
+            run = await self.agents_client.runs.create_and_process(
+                thread_id=thread_id,
+                agent_id=settings.main_orchestrator_agent_id
+            )
+            
+            # Wait for completion and get response
+            response = await self._get_agent_response(thread_id, run.id)
+            
+            return {
+                **response,
+                "thread_id": thread_id,
+                "user_id": user_id,
+                "timestamp": time.time()
+            }
                 
         except Exception as e:
-            logger.error(f"Error getting agent response: {str(e)}", exc_info=True)
-            return "I'm sorry, I encountered an error while processing your request. Please try again."
-
-    async def cleanup_thread(self, user_id: str):
-        """Clean up a user's thread."""
-        if user_id in self.threads:
-            del self.threads[user_id]
-            logger.info(f"Cleaned up thread for user {user_id}")
-
-    def close(self):
-        """Close the credential connection."""
+            logger.error(f"Error in chat: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "message": "I'm sorry, I encountered an error. Please try again later.",
+                "thread_id": thread_id
+            }
+    
+    async def _get_agent_response(self, thread_id: str, run_id: str) -> Dict[str, Any]:
+        """Wait for run completion and extract agent response"""
         try:
-            self.credential.close()
-            logger.info("AIAgentService credentials closed")
+            # Wait for completion
+            run = await self.agents_client.runs.get(thread_id=thread_id, run_id=run_id)
+            while run.status in ["queued", "in_progress"]:
+                await asyncio.sleep(1)
+                run = await self.agents_client.runs.get(thread_id=thread_id, run_id=run_id)
+            
+            if run.status == "failed":
+                logger.error(f"Run failed: {run.last_error}")
+                return {
+                    "success": False,
+                    "message": "I encountered an error processing your request."
+                }
+            
+            # Get latest agent message
+            messages = self.agents_client.messages.list(
+                thread_id=thread_id, 
+                order=ListSortOrder.DESCENDING
+            )
+            
+            async for msg in messages:
+                if msg.role == MessageRole.AGENT and msg.text_messages:
+                    return {
+                        "success": True,
+                        "message": msg.text_messages[-1].text.value
+                    }
+            
+            return {
+                "success": False,
+                "message": "No response generated"
+            }
+            
         except Exception as e:
-            logger.error(f"Error closing credentials: {str(e)}")
+            logger.error(f"Error getting agent response: {str(e)}")
+            return {
+                "success": False,
+                "message": "I encountered an error processing your request."
+            }
+    
+    async def delete_thread(self, thread_id: str) -> bool:
+        """Delete a conversation thread"""
+        try:
+            if not self._connected:
+                await self.initialize()
+            
+            await self.agents_client.threads.delete(thread_id=thread_id)
+            logger.info(f"Deleted thread {thread_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error deleting thread {thread_id}: {str(e)}")
+            return False
+    
+    async def get_status(self) -> Dict[str, Any]:
+        """Get service status"""
+        try:
+            if not self._connected:
+                await self.initialize()
+            
+            return {
+                "connected": self._connected,
+                "endpoint": settings.azure_ai_foundry_endpoint,
+                "agent_id": settings.main_orchestrator_agent_id,
+                "status": "operational" if self._connected else "disconnected"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting status: {str(e)}")
+            return {
+                "connected": False,
+                "error": str(e),
+                "status": "error"
+            }
+
+# Global service instance
+ai_agent_service = AIAgentService()

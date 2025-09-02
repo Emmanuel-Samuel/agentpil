@@ -1,0 +1,141 @@
+{
+  "name": "get_user_claims_tool",
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Get User Claims Tool",
+    "description": "Tool for retrieving user's existing claims from the database using Prisma ORM",
+    "version": "2.0.0"
+  },
+  "servers": [
+    { "url": "https://b23c85f946cd.ngrok-free.app" }
+  ],
+  "auth": [],
+  "paths": {
+    "/api/users/{userId}/claims": {
+      "get": {
+        "description": "Retrieve a user's claims with optional status filtering",
+        "operationId": "get_user_claims",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "ID of the user to retrieve claims for"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["PENDING_INFORMATION", "UNDER_REVIEW", "PENDING_DOCUMENTS", "INVESTIGATION", "PRE_SUIT", "PRE_LITIGATION", "LITIGATION", "RESOLVED_AND_CLOSED"]
+            },
+            "description": "Optional status filter"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 10
+            },
+            "description": "Maximum number of claims to return"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            },
+            "description": "Number of claims to skip for pagination"
+          },
+          {
+            "name": "sort_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "createdAt"
+            },
+            "description": "Field to sort results by"
+          },
+          {
+            "name": "sort_order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["asc", "desc"],
+              "default": "desc"
+            },
+            "description": "Sort order (ascending or descending)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved user claims",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "string" },
+                          "title": { "type": "string" },
+                          "description": { "type": "string" },
+                          "status": { 
+                            "type": "string",
+                            "enum": ["PENDING_INFORMATION", "UNDER_REVIEW", "PENDING_DOCUMENTS", "INVESTIGATION", "PRE_SUIT", "PRE_LITIGATION", "LITIGATION", "RESOLVED_AND_CLOSED"]
+                          },
+                          "createdAt": { "type": "string", "format": "date-time" },
+                          "updatedAt": { "type": "string", "format": "date-time" },
+                          "incident": {
+                            "type": "object",
+                            "properties": {
+                              "datetime": { "type": "string", "format": "date-time" },
+                              "location": { "type": "string" },
+                              "description": { "type": "string" }
+                            }
+                          },
+                          "assignedCaseManager": { "type": "string" }
+                        }
+                      }
+                    },
+                    "pagination": {
+                      "type": "object",
+                      "properties": {
+                        "total": { "type": "integer" },
+                        "limit": { "type": "integer" },
+                        "offset": { "type": "integer" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "User not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    }
+  }
+}
