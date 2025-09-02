@@ -22,13 +22,7 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
     
-    # Convert repository name to lowercase
-    - name: Convert repository name to lowercase
-      id: lowercase_repo
-      run: |
-        LOWERCASE_REPO=$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')
-        echo "lowercase_repo=$LOWERCASE_REPO" >> $GITHUB_OUTPUT
-    
+      
     # Set up Docker Buildx
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
@@ -47,14 +41,14 @@ jobs:
       with:
         context: .
         push: true
-        tags: ghcr.io/${{ github.actor }}/${{ github.repository }}:${{ github.ref_name }}
+        tags: ghcr.io/emmanuel-samuel/agentpil:${{ github.ref_name }}
         file: ./Dockerfile
     
     # Display pushed image information
     - name: Display pushed image info
       run: |   
         echo "Pushed images:"
-        echo "  ghcr.io/${{ github.actor }}/${{ github.repository }}:${{ github.ref_name }}"
+        echo "  ghcr.io/emmanuel-samuel/agentpil:${{ github.ref_name }}"
     
     # Deploy to Azure Web App
     - name: Deploy to Azure Web App
@@ -62,4 +56,4 @@ jobs:
       with:
         app-name: ${{ env.AZURE_WEBAPP_NAME }}
         publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-        images: 'ghcr.io/${{ github.actor }}/${{ github.repository }}:${{ github.ref_name }}'
+        images: 'ghcr.io/emmanuel-samuel/agentpil:${{ github.ref_name }}'
