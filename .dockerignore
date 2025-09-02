@@ -45,10 +45,6 @@ ENV/
 # Azure
 .azure/
 
-# Docker
-Dockerfile
-.dockerignore
-
 # OS
 .DS_Store
 Thumbs.db
