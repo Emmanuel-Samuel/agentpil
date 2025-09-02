@@ -22,6 +22,13 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
     
+    # Convert repository name to lowercase
+    - name: Convert repository name to lowercase
+      id: lowercase_repo
+      run: |
+        LOWERCASE_REPO=$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')
+        echo "lowercase_repo=$LOWERCASE_REPO" >> $GITHUB_OUTPUT
+    
     # Set up Docker Buildx
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
@@ -39,7 +46,7 @@ jobs:
       id: meta
       uses: docker/metadata-action@v5
       with:
-        images: ${{ env.REGISTRY }}/${{ github.repository }}
+        images: ${{ env.REGISTRY }}/${{ steps.lowercase_repo.outputs.lowercase_repo }}
     
     # Build and push Docker image
     - name: Build and push Docker image
@@ -58,4 +65,4 @@ jobs:
       with:
         app-name: ${{ env.AZURE_WEBAPP_NAME }}
         publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-        images: ${{ env.REGISTRY }}/${{ github.repository }}:${{ github.sha }}
+        images: ${{ env.REGISTRY }}/${{ steps.lowercase_repo.outputs.lowercase_repo }}:${{ github.sha }}
