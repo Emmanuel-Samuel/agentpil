@@ -9,7 +9,6 @@ from pydantic import BaseModel, Field
 from datetime import datetime
 from enum import Enum
 
-
 from .config.config import settings
 from .services.database import (
     get_user_by_id, 
@@ -31,15 +30,15 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan management"""
     logger.info("Starting FastAPI application...")
-
+    
     # Initialize database and AI service
     await initialize_db()
     await ai_agent_service.initialize()
-
+    
     logger.info("Application started - OpenAPI docs at /docs")
-
+    
     yield
-
+    
     # Shutdown
     logger.info("Shutting down...")
     await ai_agent_service.close()
@@ -89,14 +88,17 @@ class WitnessInfo(BaseModel):
     phone: Optional[str] = None
 
 class IncidentDetails(BaseModel):
-    datetime: datetime
-    location: str
-    description: str
-    witnesses: Optional[List[WitnessInfo]] = []
-    reportNumber: Optional[str] = ""
-    reportCompleted: Optional[bool] = False
-    injuries: Optional[List[str]] = []
-    workRelated: Optional[bool] = False
+    datetime: Optional[datetime] = None
+    location: Optional[str] = None
+    description: Optional[str] = None
+    workRelated: Optional[bool] = None
+    reportCompleted: Optional[bool] = None
+    policeReportCompleted: Optional[bool] = None
+    supportingDocument: Optional[bool] = None
+    witness: Optional[bool] = None
+    priorRepresentation: Optional[bool] = None
+    lostEarning: Optional[str] = None
+    reportNumber: Optional[str] = None
 
 class SaveClaimRequest(BaseModel):
     title: str
@@ -122,6 +124,8 @@ class UpdateClaimRequest(BaseModel):
     isOver65: Optional[bool] = None
     receiveMedicare: Optional[List[str]] = None
     assignedCaseManager: Optional[str] = None
+    # Add incident field
+    incident: Optional[IncidentDetails] = None
 
 class UpdateUserRequest(BaseModel):
     """Request model for updating user profile"""
@@ -335,17 +339,26 @@ async def update_claim_endpoint(
 ):
     """Update claim data"""
     try:
+        # Log the incoming request for debugging
+        logger.info(f"Update claim request for claim_id: {claim_id}")
+        logger.info(f"Request data: {request.model_dump()}")
+        
         # Convert request to dict, excluding None values
         updates = {k: v for k, v in request.model_dump().items() if v is not None}
         
+        logger.info(f"Filtered updates: {updates}")
+        
         if not updates:
-            raise HTTPException(status_code=400, detail="No valid fields to update")
+            logger.warning("No valid fields to update")
+            raise HTTPException(status_code=400, detail="No valid fields to update. Please provide at least one field to update.")
         
         result = await update_claim(claim_id, updates)
         
         if not result:
+            logger.warning(f"Claim not found or update failed for claim_id: {claim_id}")
             raise HTTPException(status_code=404, detail="Claim not found or update failed")
         
+        logger.info(f"Successfully updated claim {claim_id}")
         return {
             "success": True,
             "message": "Claim updated successfully",
@@ -356,7 +369,8 @@ async def update_claim_endpoint(
         raise
     except Exception as e:
         logger.error(f"Error updating claim {claim_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        logger.exception("Full traceback:")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 @app.patch("/api/users/{user_id}", 
           operation_id="update_user_profile_tool",
