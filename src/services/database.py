@@ -245,7 +245,7 @@ async def get_user_claims(user_id: str, status: Optional[str] = None) -> List[Di
         return []
 
 async def update_claim(claim_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Update claim"""
+    """Update claim with support for incident updates"""
     try:
         prisma = await get_db()
         
@@ -257,26 +257,81 @@ async def update_claim(claim_id: str, updates: Dict[str, Any]) -> Optional[Dict[
         }
         
         # Filter updates to only include valid schema fields
-        mapped_updates = {k: v for k, v in updates.items() if k in valid_fields}
+        claim_updates = {k: v for k, v in updates.items() if k in valid_fields}
         
-        if not mapped_updates:
+        # Handle incident updates if provided
+        incident_updates = None
+        if 'incident' in updates and isinstance(updates['incident'], dict):
+            incident_data = updates['incident']
+            
+            # Map API fields to Prisma schema fields
+            incident_updates = {
+                "datetime": incident_data.get('datetime'),
+                "location": incident_data.get('location'),
+                "description": incident_data.get('description'),
+                "workRelated": incident_data.get('workRelated'),
+                "reportCompleted": incident_data.get('reportCompleted'),
+                "policeReportCompleted": incident_data.get('policeReportCompleted'),
+                "supportingDocument": incident_data.get('supportingDocument'),
+                "witness": incident_data.get('witness'),
+                "priorRepresentation": incident_data.get('priorRepresentation'),
+                "lostEarning": incident_data.get('lostEarning'),
+                "reportNumber": incident_data.get('reportNumber')
+            }
+            
+            # Remove None values
+            incident_updates = {k: v for k, v in incident_updates.items() if v is not None}
+        
+        if not claim_updates and not incident_updates:
             logger.warning(f"No valid fields to update for claim {claim_id}")
             return None
         
-        claim = await prisma.claim.update(
-            where={"id": claim_id},
-            data=mapped_updates,
-            include={
-                "user": True,
-                "incident": True,
-                "claimlist": True
-            }
-        )
+        # First update incident if needed
+        if incident_updates:
+            # Check if claim has an incident
+            claim = await prisma.claim.find_unique(
+                where={"id": claim_id},
+                include={"incident": True}
+            )
+            
+            if claim and claim.incident:
+                # Update existing incident
+                await prisma.incident.update(
+                    where={"id": claim.incident.id},
+                    data=incident_updates
+                )
+            elif claim:
+                # Create new incident and connect to claim
+                incident = await prisma.incident.create(data=incident_updates)
+                claim_updates["incident"] = {"connect": {"id": incident.id}}
         
-        return claim.model_dump()
+        # Then update claim if needed
+        if claim_updates:
+            claim = await prisma.claim.update(
+                where={"id": claim_id},
+                data=claim_updates,
+                include={
+                    "user": True,
+                    "incident": True,
+                    "claimlist": True
+                }
+            )
+            return claim.model_dump()
+        else:
+            # If only incident was updated, return the updated claim
+            claim = await prisma.claim.find_unique(
+                where={"id": claim_id},
+                include={
+                    "user": True,
+                    "incident": True,
+                    "claimlist": True
+                }
+            )
+            return claim.model_dump() if claim else None
         
     except Exception as e:
-        logger.error(f"Error updating claim: {str(e)}")
+        logger.error(f"Error updating claim {claim_id}: {str(e)}")
+        logger.exception("Full traceback:")
         return None
 
 async def update_user(user_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
