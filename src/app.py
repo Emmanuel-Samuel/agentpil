@@ -130,6 +130,7 @@ class SaveClaimRequest(BaseModel):
 
 class UpdateClaimRequest(BaseModel):
     """Request model for updating claim data"""
+    # Basic claim fields
     status: Optional[ClaimStatus] = None
     injured: Optional[bool] = None
     relationship: Optional[Relationship] = None
@@ -139,10 +140,22 @@ class UpdateClaimRequest(BaseModel):
     isOver65: Optional[bool] = None
     receiveMedicare: Optional[List[str]] = Field(None, alias="receiveMedicare")
     assignedCaseManager: Optional[str] = None
+    
+    # Additional claim fields from Prisma schema
+    title: Optional[str] = None
+    description: Optional[str] = None
+    createdAt: Optional[datetime] = None
+    updatedAt: Optional[datetime] = None
+    
     # Relationship IDs
     clientRoleId: Optional[str] = None
     injuredPartyRoleId: Optional[str] = None
     healthInsuranceProviderId: Optional[str] = None
+    userId: Optional[str] = None
+    claimlistId: Optional[str] = None
+    incidentId: Optional[str] = None
+    
+    # Nested incident update
     incident: Optional[IncidentDetails] = None
 
 class UpdateUserRequest(BaseModel):
@@ -174,6 +187,7 @@ class UpdateUserRequest(BaseModel):
     address_city: Optional[str] = None
     address_state: Optional[str] = None
     address_postalCode: Optional[str] = None
+    address_country: Optional[str] = None
     # Physical address
     isPOBoxOrDifferentAddress: Optional[bool] = None
     physicalAddress1: Optional[str] = None
