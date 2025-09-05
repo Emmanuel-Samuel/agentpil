@@ -318,8 +318,30 @@ async def update_user(user_id: str, updates: Dict[str, Any]) -> Optional[Dict[st
         # Map flattened address fields to nested structure if needed
         update_data = updates.copy()
         
-        # Handle address fields
+        # Handle address fields - both direct and aliased
         address_fields = {}
+        
+        # Direct address field mapping
+        address_mapping = {
+            'mailingAddress1': 'mailingAddress1',
+            'mailingAddress2': 'mailingAddress2',
+            'mailingCity': 'mailingCity',
+            'mailingState': 'mailingState',
+            'mailingZipCode': 'mailingZipCode',
+            'isPOBoxOrDifferentAddress': 'isPOBoxOrDifferentAddress',
+            'physicalAddress1': 'physicalAddress1',
+            'physicalAddress2': 'physicalAddress2',
+            'physicalCity': 'physicalCity',
+            'physicalState': 'physicalState',
+            'physicalZipCode': 'physicalZipCode'
+        }
+        
+        # Handle direct address fields
+        for api_field, db_field in address_mapping.items():
+            if api_field in update_data:
+                address_fields[db_field] = update_data.pop(api_field)
+        
+        # Handle legacy address_ prefixed fields for backward compatibility
         for key in list(update_data.keys()):
             if key.startswith('address_'):
                 field_name = key.replace('address_', '')
@@ -338,13 +360,44 @@ async def update_user(user_id: str, updates: Dict[str, Any]) -> Optional[Dict[st
                 # For now, skip preferences - would need separate preferences table
                 update_data.pop(key)
         
-        # Map common fields
+        # Map common fields - comprehensive mapping for all User fields
         field_mapping = {
             'firstName': 'firstName',
+            'middleName': 'middleName',
             'lastName': 'lastName', 
+            'injured': 'injured',
             'email': 'email',
-            'phoneNumber': 'phone',
-            'dateOfBirth': 'dateOfBirth'
+            'phone': 'phone',
+            'phoneNumber': 'phone',  # Alias for phone
+            'phone2': 'phone2',
+            'gender': 'gender',
+            'dateOfBirth': 'dateOfBirth',
+            'isUnder18': 'isUnder18',
+            # Parent info
+            'fatherFirstName': 'fatherFirstName',
+            'fatherLastName': 'fatherLastName',
+            'motherFirstName': 'motherFirstName',
+            'motherLastName': 'motherLastName',
+            # Personal info
+            'maritalStatus': 'maritalStatus',
+            'spouseFirstName': 'spouseFirstName',
+            'spouseLastName': 'spouseLastName',
+            'spousePhone': 'spousePhone',
+            # Employment
+            'employmentStatus': 'employmentStatus',
+            'employerName': 'employerName',
+            'employerTitle': 'employerTitle',
+            'employmentType': 'employmentType',
+            'pay': 'pay',
+            # Education
+            'schoolName': 'schoolName',
+            'expectedGraduationYear': 'expectedGraduationYear',
+            # System fields
+            'role': 'role',
+            'isVerified': 'isVerified',
+            'verificationCode': 'verificationCode',
+            'sourceId': 'sourceId',
+            'accountSync': 'accountSync'
         }
         
         mapped_data = {}
