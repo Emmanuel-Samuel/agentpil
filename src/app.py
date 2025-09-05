@@ -330,7 +330,7 @@ async def get_claim_endpoint(claim_id: str = Path(...)):
         logger.error(f"Error retrieving claim: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.put("/api/claims/{claim_id}", 
+@app.patch("/api/claims/{claim_id}", 
          operation_id="update_claim_data_tool",
          tags=["claims"])
 async def update_claim_endpoint(
