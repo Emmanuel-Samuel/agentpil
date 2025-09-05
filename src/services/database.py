@@ -249,65 +249,36 @@ async def update_claim(claim_id: str, updates: Dict[str, Any]) -> Optional[Dict[
     try:
         prisma = await get_db()
         
-        # All updatable fields match Prisma schema directly
-        valid_fields = {
-            'status', 'injured', 'relationship', 'otherRelationship', 
-            'healthInsurance', 'healthInsuranceNumber', 'isOver65', 
-            'receiveMedicare', 'assignedCaseManager'
-        }
-        
-        # Filter updates to only include valid schema fields
-        claim_updates = {k: v for k, v in updates.items() if k in valid_fields}
-        
+        # Separate incident updates from other claim updates
+        incident_updates_data = updates.pop('incident', None)
+        claim_updates = updates
+
         # Handle incident updates if provided
-        incident_updates = None
-        if 'incident' in updates and isinstance(updates['incident'], dict):
-            incident_data = updates['incident']
+        if incident_updates_data and isinstance(incident_updates_data, dict):
+            # Remove None values from incident data
+            incident_updates = {k: v for k, v in incident_updates_data.items() if v is not None}
             
-            # Map API fields to Prisma schema fields
-            incident_updates = {
-                "datetime": incident_data.get('datetime'),
-                "location": incident_data.get('location'),
-                "description": incident_data.get('description'),
-                "workRelated": incident_data.get('workRelated'),
-                "reportCompleted": incident_data.get('reportCompleted'),
-                "policeReportCompleted": incident_data.get('policeReportCompleted'),
-                "supportingDocument": incident_data.get('supportingDocument'),
-                "witness": incident_data.get('witness'),
-                "priorRepresentation": incident_data.get('priorRepresentation'),
-                "lostEarning": incident_data.get('lostEarning'),
-                "reportNumber": incident_data.get('reportNumber')
-            }
-            
-            # Remove None values
-            incident_updates = {k: v for k, v in incident_updates.items() if v is not None}
-        
-        if not claim_updates and not incident_updates:
-            logger.warning(f"No valid fields to update for claim {claim_id}")
-            return None
-        
-        # First update incident if needed
-        if incident_updates:
-            # Check if claim has an incident
-            claim = await prisma.claim.find_unique(
-                where={"id": claim_id},
-                include={"incident": True}
-            )
-            
-            if claim and claim.incident:
-                # Update existing incident
-                await prisma.incident.update(
-                    where={"id": claim.incident.id},
-                    data=incident_updates
+            if incident_updates:
+                # Check if claim has an incident
+                claim = await prisma.claim.find_unique(
+                    where={"id": claim_id},
+                    include={"incident": True}
                 )
-            elif claim:
-                # Create new incident and connect to claim
-                incident = await prisma.incident.create(data=incident_updates)
-                claim_updates["incident"] = {"connect": {"id": incident.id}}
-        
-        # Then update claim if needed
+                
+                if claim and claim.incident:
+                    # Update existing incident
+                    await prisma.incident.update(
+                        where={"id": claim.incident.id},
+                        data=incident_updates
+                    )
+                elif claim:
+                    # Create new incident and connect to claim
+                    incident = await prisma.incident.create(data=incident_updates)
+                    claim_updates["incident"] = {"connect": {"id": incident.id}}
+
+        # Update claim fields if any are provided
         if claim_updates:
-            claim = await prisma.claim.update(
+            updated_claim = await prisma.claim.update(
                 where={"id": claim_id},
                 data=claim_updates,
                 include={
@@ -316,10 +287,11 @@ async def update_claim(claim_id: str, updates: Dict[str, Any]) -> Optional[Dict[
                     "claimlist": True
                 }
             )
-            return claim.model_dump()
-        else:
-            # If only incident was updated, return the updated claim
-            claim = await prisma.claim.find_unique(
+            return updated_claim.model_dump()
+        
+        # If only incident was updated, fetch and return the updated claim
+        if incident_updates_data:
+            updated_claim = await prisma.claim.find_unique(
                 where={"id": claim_id},
                 include={
                     "user": True,
@@ -327,7 +299,11 @@ async def update_claim(claim_id: str, updates: Dict[str, Any]) -> Optional[Dict[
                     "claimlist": True
                 }
             )
-            return claim.model_dump() if claim else None
+            return updated_claim.model_dump() if updated_claim else None
+
+        # If no updates were provided at all
+        logger.warning(f"No valid fields to update for claim {claim_id}")
+        return None
         
     except Exception as e:
         logger.error(f"Error updating claim {claim_id}: {str(e)}")
