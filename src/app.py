@@ -99,6 +99,21 @@ class IncidentDetails(BaseModel):
     priorRepresentation: Optional[bool] = None
     lostEarning: Optional[str] = None
     reportNumber: Optional[str] = None
+    vehicleRole: Optional[str] = None
+    vehicleCount: Optional[int] = None
+    busOrVehicle: Optional[str] = None
+    transportType: Optional[str] = None
+    rideShareCompany: Optional[str] = None
+    rideShareOtherName: Optional[str] = None
+    propertyType: Optional[str] = None
+    amountLoss: Optional[str] = None
+    timeLoss: Optional[str] = None
+    priorRepresentationReason: Optional[str] = None
+    # Relationship IDs
+    policeStationId: Optional[str] = None
+    policeOfficerId: Optional[str] = None
+    lawfirmId: Optional[str] = None
+    attorneyId: Optional[str] = None
 
 class SaveClaimRequest(BaseModel):
     title: str
@@ -122,22 +137,70 @@ class UpdateClaimRequest(BaseModel):
     healthInsurance: Optional[bool] = None
     healthInsuranceNumber: Optional[str] = None
     isOver65: Optional[bool] = None
-    receiveMedicare: Optional[List[str]] = None
+    receiveMedicare: Optional[List[str]] = Field(None, alias="receiveMedicare")
     assignedCaseManager: Optional[str] = None
-    # Add incident field
+    # Relationship IDs
+    clientRoleId: Optional[str] = None
+    injuredPartyRoleId: Optional[str] = None
+    healthInsuranceProviderId: Optional[str] = None
     incident: Optional[IncidentDetails] = None
 
 class UpdateUserRequest(BaseModel):
     """Request model for updating user profile"""
     firstName: Optional[str] = None
+    middleName: Optional[str] = None
     lastName: Optional[str] = None
+    injured: Optional[str] = None  # WereYouInjured enum as string
     email: Optional[str] = None
-    phoneNumber: Optional[str] = None
+    phone: Optional[str] = None
+    phoneNumber: Optional[str] = None  # Alias for phone
+    phone2: Optional[str] = None
+    gender: Optional[str] = None
     dateOfBirth: Optional[str] = None
+    isUnder18: Optional[bool] = None
+    # Parent info
+    fatherFirstName: Optional[str] = None
+    fatherLastName: Optional[str] = None
+    motherFirstName: Optional[str] = None
+    motherLastName: Optional[str] = None
+    # Mailing address
+    mailingAddress1: Optional[str] = None
+    mailingAddress2: Optional[str] = None
+    mailingCity: Optional[str] = None
+    mailingState: Optional[str] = None
+    mailingZipCode: Optional[str] = None
+    # Address aliases for backward compatibility
     address_street: Optional[str] = None
     address_city: Optional[str] = None
     address_state: Optional[str] = None
     address_postalCode: Optional[str] = None
+    # Physical address
+    isPOBoxOrDifferentAddress: Optional[bool] = None
+    physicalAddress1: Optional[str] = None
+    physicalAddress2: Optional[str] = None
+    physicalCity: Optional[str] = None
+    physicalState: Optional[str] = None
+    physicalZipCode: Optional[str] = None
+    # Personal info
+    maritalStatus: Optional[str] = None
+    spouseFirstName: Optional[str] = None
+    spouseLastName: Optional[str] = None
+    spousePhone: Optional[str] = None
+    # Employment
+    employmentStatus: Optional[str] = None
+    employerName: Optional[str] = None
+    employerTitle: Optional[str] = None
+    employmentType: Optional[str] = None
+    pay: Optional[str] = None
+    # Education
+    schoolName: Optional[str] = None
+    expectedGraduationYear: Optional[str] = None
+    # System fields
+    role: Optional[str] = None
+    isVerified: Optional[bool] = None
+    verificationCode: Optional[str] = None
+    sourceId: Optional[str] = None
+    accountSync: Optional[str] = None
 
 class ChatMessage(BaseModel):
     message: str
@@ -330,7 +393,7 @@ async def get_claim_endpoint(claim_id: str = Path(...)):
         logger.error(f"Error retrieving claim: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.put("/api/claims/{claim_id}", 
+@app.patch("/api/claims/{claim_id}", 
          operation_id="update_claim_data_tool",
          tags=["claims"])
 async def update_claim_endpoint(
