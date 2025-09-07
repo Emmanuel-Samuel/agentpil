@@ -85,9 +85,12 @@ class AIAgentService:
             # Create structured message with context
             structured_message = {
                 "user_id": user_id,
-                "claim_id": claim_id,
                 "message": message
             }
+            
+            # Only include claim_id if it's a valid, non-null value
+            if claim_id and isinstance(claim_id, str) and claim_id.strip() and claim_id.lower() != "null":
+                structured_message["claim_id"] = claim_id
             
             # Add message to thread
             await self.agents_client.messages.create(
