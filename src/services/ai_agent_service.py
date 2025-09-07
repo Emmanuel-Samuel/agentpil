@@ -92,11 +92,15 @@ class AIAgentService:
             if claim_id and isinstance(claim_id, str) and claim_id.strip() and claim_id.lower() != "null":
                 structured_message["claim_id"] = claim_id
             
+            # Debug: Log what we're actually sending to the agent
+            message_content = json.dumps(structured_message)
+            logger.info(f"Sending to AI agent: {message_content}")
+            
             # Add message to thread
             await self.agents_client.messages.create(
                 thread_id=thread_id,
                 role=MessageRole.USER,
-                content=json.dumps(structured_message)
+                content=message_content
             )
             
             # Create and process run
