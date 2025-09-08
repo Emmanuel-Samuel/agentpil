@@ -5,7 +5,7 @@ import logging
 from contextlib import asynccontextmanager
 import time
 from typing import Any, Dict, Optional, List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 from enum import Enum
 
@@ -87,6 +87,26 @@ class WitnessInfo(BaseModel):
     name: str
     phone: Optional[str] = None
 
+class SaveClaimRequest(BaseModel):
+    title: str
+    description: str
+    incident: IncidentDetails
+    status: Optional[ClaimStatus] = ClaimStatus.PENDING_INFORMATION
+    injured: Optional[bool] = True
+    healthInsurance: Optional[bool] = None
+    userId: str
+    relationship: Optional[Relationship] = None
+    otherRelationship: Optional[str] = Field(default=None, description="Specify if relationship is 'Other'")
+    healthInsuranceNumber: Optional[str] = None
+    isOver65: Optional[bool] = None
+    
+    @field_validator('otherRelationship', mode='before')
+    @classmethod
+    def empty_string_to_none(cls, v):
+        if v == "":
+            return None
+        return v
+
 class IncidentDetails(BaseModel):
     datetime: Optional[datetime] = None
     location: Optional[str] = None
@@ -99,22 +119,16 @@ class IncidentDetails(BaseModel):
     priorRepresentation: Optional[bool] = None
     lostEarning: Optional[str] = None
     reportNumber: Optional[str] = None
-    vehicleRole: Optional[str] = None
+    vehicleRole: Optional[str] = Field(default=None, description="Role in vehicle (driver/passenger)")
     vehicleCount: Optional[int] = None
-    busOrVehicle: Optional[str] = None
-
-class SaveClaimRequest(BaseModel):
-    title: str
-    description: str
-    incident: IncidentDetails  # Remove Optional to make it required
-    status: Optional[ClaimStatus] = ClaimStatus.PENDING_INFORMATION
-    injured: Optional[bool] = True
-    healthInsurance: Optional[bool] = None
-    userId: str
-    relationship: Optional[Relationship] = None
-    otherRelationship: Optional[str] = None
-    healthInsuranceNumber: Optional[str] = None
-    isOver65: Optional[bool] = None
+    busOrVehicle: Optional[str] = Field(default=None, description="Bus passenger or other vehicle")
+    
+    @field_validator('vehicleRole', mode='before')
+    @classmethod
+    def normalize_vehicle_role(cls, v):
+        if v and v.lower() == "none":
+            return None
+        return v
 
 class UpdateClaimRequest(BaseModel):
     """Request model for updating claim data"""
@@ -248,6 +262,7 @@ async def create_claim_endpoint(request: SaveClaimRequest):
             raise HTTPException(status_code=400, detail="Invalid userId")
         
         logger.info(f"Creating claim for user {request.userId}")
+        logger.info(f"Request data: {request.model_dump()}")
         
         # Convert request to dict and handle datetime serialization
         request_dict = request.model_dump()
@@ -279,6 +294,7 @@ async def create_claim_endpoint(request: SaveClaimRequest):
         raise
     except Exception as e:
         logger.error(f"Error creating claim: {str(e)}")
+        logger.exception("Full traceback:")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/users/{user_id}/claims", tags=["claims"])
