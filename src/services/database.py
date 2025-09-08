@@ -140,19 +140,7 @@ async def create_claim(claim_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         
         # Log the incident data for debugging
         logger.info(f"Incident data: {incident_data}")
-        
-        # Handle datetime conversion
-        datetime_value = incident_data.get('datetime')
-        if datetime_value and isinstance(datetime_value, str):
-            try:
-                # Parse the datetime string
-                parsed_datetime = datetime.fromisoformat(datetime_value.replace('Z', '+00:00'))
-                incident_data['datetime'] = parsed_datetime
-            except ValueError:
-                # If parsing fails, set to None
-                logger.error(f"Failed to parse datetime: {datetime_value}")
-                incident_data['datetime'] = None
-        
+              
         # Map API fields to Prisma schema fields with default values
         incident_create_data = {
             "datetime": incident_data.get('datetime'),
