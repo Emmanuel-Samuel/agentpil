@@ -344,11 +344,14 @@ async def get_claim_endpoint(claim_id: str = Path(...)):
 @app.put("/api/claims/{claim_id}", 
          operation_id="update_claim_data_tool",
          tags=["claims"])
+@app.patch("/api/claims/{claim_id}", 
+          operation_id="update_claim_data_tool",
+          tags=["claims"])
 async def update_claim_endpoint(
     request: UpdateClaimRequest,
     claim_id: str = Path(...)
 ):
-    """Update claim data"""
+    """Update claim data with support for both PUT and PATCH methods"""
     try:
         # Log the incoming request for debugging
         logger.info(f"Update claim request for claim_id: {claim_id}")
@@ -382,6 +385,7 @@ async def update_claim_endpoint(
         logger.error(f"Error updating claim {claim_id}: {str(e)}")
         logger.exception("Full traceback:")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
 
 @app.patch("/api/users/{user_id}", 
           operation_id="update_user_profile_tool",
