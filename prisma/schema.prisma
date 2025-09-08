@@ -704,7 +704,7 @@ model Incident {
   rideShareCompany      String?        @map("Ride sharing company")
   rideShareOtherName    String?        @map("Other ride sharing company name")
   propertyType          PropertyType?  @map("Business or private property?")
-  datetime              DateTime?      @map("Date of Accident")
+  datetime              DateTime       @map("Date of Accident")
   location              String?        @map("Incident Location")
   workRelated           Boolean        @map("Were you at work at the time of the accident?")
   description           String?        @map("Description of Accident")
