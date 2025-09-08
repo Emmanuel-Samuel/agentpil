@@ -236,7 +236,6 @@ async def delete_thread_endpoint(thread_id: str = Path(...)):
             }
         )
 
-
 @app.post("/api/claims", 
           status_code=201,
           operation_id="create_claim_tool",
@@ -248,18 +247,17 @@ async def create_claim_endpoint(request: SaveClaimRequest):
             raise HTTPException(status_code=400, detail="Invalid userId")
         
         logger.info(f"Creating claim for user {request.userId}")
-        logger.info(f"Request data: {request.model_dump()}")
         
-        # Convert request to dict and handle datetime serialization
+        # Convert request to dict
         request_dict = request.model_dump()
+        logger.info(f"Original request data: {request_dict}")
         
-        # Ensure datetime is properly serialized if present
-        if 'incident' in request_dict and 'datetime' in request_dict['incident'] and request_dict['incident']['datetime']:
-            if isinstance(request_dict['incident']['datetime'], datetime):
-                request_dict['incident']['datetime'] = request_dict['incident']['datetime'].isoformat()
+        # Clean the data to remove empty strings and invalid values
+        cleaned_data = clean_claim_data(request_dict)
+        logger.info(f"Cleaned request data: {cleaned_data}")
         
         # Create claim using database service
-        result = await create_claim(request_dict)
+        result = await create_claim(cleaned_data)
         
         if not result or not result.get("success"):
             raise HTTPException(
@@ -282,7 +280,7 @@ async def create_claim_endpoint(request: SaveClaimRequest):
         logger.error(f"Error creating claim: {str(e)}")
         logger.exception("Full traceback:")
         raise HTTPException(status_code=500, detail=str(e))
-
+        
 @app.get("/api/users/{user_id}/claims", tags=["claims"])
 async def get_claims_endpoint(
     user_id: str = Path(...),
