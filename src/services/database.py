@@ -341,7 +341,7 @@ async def update_claim(claim_id: str, updates: Dict[str, Any]) -> Optional[Dict[
                     "claimlist": True
                 }
             )
-            return claim.model_dump()
+            return claim.model_dump() if claim else None
         else:
             # If only incident was updated, return the updated claim
             claim = await prisma.claim.find_unique(
