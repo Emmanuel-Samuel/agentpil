@@ -87,26 +87,6 @@ class WitnessInfo(BaseModel):
     name: str
     phone: Optional[str] = None
 
-class SaveClaimRequest(BaseModel):
-    title: str
-    description: str
-    incident: IncidentDetails
-    status: Optional[ClaimStatus] = ClaimStatus.PENDING_INFORMATION
-    injured: Optional[bool] = True
-    healthInsurance: Optional[bool] = None
-    userId: str
-    relationship: Optional[Relationship] = None
-    otherRelationship: Optional[str] = Field(default=None, description="Specify if relationship is 'Other'")
-    healthInsuranceNumber: Optional[str] = None
-    isOver65: Optional[bool] = None
-    
-    @field_validator('otherRelationship', mode='before')
-    @classmethod
-    def empty_string_to_none(cls, v):
-        if v == "":
-            return None
-        return v
-
 class IncidentDetails(BaseModel):
     datetime: Optional[datetime] = None
     location: Optional[str] = None
@@ -127,6 +107,26 @@ class IncidentDetails(BaseModel):
     @classmethod
     def normalize_vehicle_role(cls, v):
         if v and v.lower() == "none":
+            return None
+        return v
+
+class SaveClaimRequest(BaseModel):
+    title: str
+    description: str
+    incident: IncidentDetails
+    status: Optional[ClaimStatus] = ClaimStatus.PENDING_INFORMATION
+    injured: Optional[bool] = True
+    healthInsurance: Optional[bool] = None
+    userId: str
+    relationship: Optional[Relationship] = None
+    otherRelationship: Optional[str] = Field(default=None, description="Specify if relationship is 'Other'")
+    healthInsuranceNumber: Optional[str] = None
+    isOver65: Optional[bool] = None
+    
+    @field_validator('otherRelationship', mode='before')
+    @classmethod
+    def empty_string_to_none(cls, v):
+        if v == "":
             return None
         return v
 
