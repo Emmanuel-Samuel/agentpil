@@ -138,6 +138,9 @@ async def create_claim(claim_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         # Always create an incident (even if minimal data)
         incident_data = claim_data.get('incident', {}).copy()
         
+        # Log the incident data for debugging
+        logger.info(f"Incident data: {incident_data}")
+        
         # Map API fields to Prisma schema fields
         incident_create_data = {
             "datetime": incident_data.get('datetime'),
@@ -156,6 +159,12 @@ async def create_claim(claim_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             "busOrVehicle": incident_data.get('busOrVehicle')
         }
         
+        # Remove None values from incident_create_data
+        incident_create_data = {k: v for k, v in incident_create_data.items() if v is not None}
+        
+        # Log the incident create data for debugging
+        logger.info(f"Incident create data: {incident_create_data}")
+        
         # Create incident
         incident = await prisma.incident.create(data=incident_create_data)
         
@@ -172,6 +181,12 @@ async def create_claim(claim_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             "healthInsuranceNumber": claim_data.get('healthInsuranceNumber'),
             "isOver65": claim_data.get('isOver65')
         }
+        
+        # Remove None values from claim_create_data
+        claim_create_data = {k: v for k, v in claim_create_data.items() if v is not None}
+        
+        # Log the claim create data for debugging
+        logger.info(f"Claim create data: {claim_create_data}")
         
         # Create claim
         claim = await prisma.claim.create(
@@ -194,8 +209,9 @@ async def create_claim(claim_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         
     except Exception as e:
         logger.error(f"Error creating claim: {str(e)}")
+        logger.exception("Full traceback:")
         return {"success": False, "message": f"Failed to create claim: {str(e)}"}
-
+        
 async def get_claim_by_id(claim_id: str) -> Optional[Dict[str, Any]]:
     """Get claim by ID"""
     try:
