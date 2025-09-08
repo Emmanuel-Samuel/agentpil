@@ -57,7 +57,7 @@ enum Relationship {
   Self
   Parent
   Child
-  Sibiling
+  Sibling
   Friend
   Representative
   Other
