@@ -248,16 +248,12 @@ async def create_claim_endpoint(request: SaveClaimRequest):
         
         logger.info(f"Creating claim for user {request.userId}")
         
-        # Convert request to dict
-        request_dict = request.model_dump()
-        logger.info(f"Original request data: {request_dict}")
-        
-        # Clean the data to remove empty strings and invalid values
-        cleaned_data = clean_claim_data(request_dict)
-        logger.info(f"Cleaned request data: {cleaned_data}")
-        
+        # Convert request to dict - use exclude_unset to only include provided values
+        request_dict = request.model_dump(exclude_unset=True)
+        logger.info(f"Request data: {request_dict}")
+           
         # Create claim using database service
-        result = await create_claim(cleaned_data)
+        result = await create_claim(request_dict)
         
         if not result or not result.get("success"):
             raise HTTPException(
