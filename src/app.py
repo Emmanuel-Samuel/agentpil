@@ -106,7 +106,7 @@ class IncidentDetails(BaseModel):
 class SaveClaimRequest(BaseModel):
     title: str
     description: str
-    incident: IncidentDetails
+    incident: IncidentDetails  # Remove Optional to make it required
     status: Optional[ClaimStatus] = ClaimStatus.PENDING_INFORMATION
     injured: Optional[bool] = True
     healthInsurance: Optional[bool] = None
@@ -249,8 +249,16 @@ async def create_claim_endpoint(request: SaveClaimRequest):
         
         logger.info(f"Creating claim for user {request.userId}")
         
+        # Convert request to dict and handle datetime serialization
+        request_dict = request.model_dump()
+        
+        # Ensure datetime is properly serialized if present
+        if 'incident' in request_dict and 'datetime' in request_dict['incident'] and request_dict['incident']['datetime']:
+            if isinstance(request_dict['incident']['datetime'], datetime):
+                request_dict['incident']['datetime'] = request_dict['incident']['datetime'].isoformat()
+        
         # Create claim using database service
-        result = await create_claim(request.model_dump())
+        result = await create_claim(request_dict)
         
         if not result or not result.get("success"):
             raise HTTPException(
