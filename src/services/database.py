@@ -135,38 +135,36 @@ async def create_claim(claim_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         if not user:
             return {"success": False, "message": "User not found"}
         
-        # First create the incident if provided
-        incident_id = None
-        if 'incident' in claim_data:
-            incident_data = claim_data['incident'].copy()
-            
-            # Map API fields to Prisma schema fields
-            incident_create_data = {
-                "datetime": incident_data.get('datetime'),
-                "location": incident_data.get('location'),
-                "description": incident_data.get('description'),
-                "workRelated": incident_data.get('workRelated', False),
-                "reportCompleted": incident_data.get('reportCompleted', False),
-                "policeReportCompleted": incident_data.get('policeReportCompleted', False),
-                "supportingDocument": incident_data.get('supportingDocument', False),
-                "witness": incident_data.get('witness', False),
-                "priorRepresentation": incident_data.get('priorRepresentation', False),
-                "lostEarning": incident_data.get('lostEarning', ''),
-                "reportNumber": incident_data.get('reportNumber', ''),
-                "vehicleRole": incident_data.get('vehicleRole'),
-                "vehicleCount": incident_data.get('vehicleCount'),
-                "busOrVehicle": incident_data.get('busOrVehicle')
-            }
-            
-            # Create incident first
-            incident = await prisma.incident.create(data=incident_create_data)
-            incident_id = incident.id
+        # Always create an incident (even if minimal data)
+        incident_data = claim_data.get('incident', {}).copy()
+        
+        # Map API fields to Prisma schema fields
+        incident_create_data = {
+            "datetime": incident_data.get('datetime'),
+            "location": incident_data.get('location', ''),
+            "description": incident_data.get('description', ''),
+            "workRelated": incident_data.get('workRelated', False),
+            "reportCompleted": incident_data.get('reportCompleted', False),
+            "policeReportCompleted": incident_data.get('policeReportCompleted', False),
+            "supportingDocument": incident_data.get('supportingDocument', False),
+            "witness": incident_data.get('witness', False),
+            "priorRepresentation": incident_data.get('priorRepresentation', False),
+            "lostEarning": incident_data.get('lostEarning', ''),
+            "reportNumber": incident_data.get('reportNumber', ''),
+            "vehicleRole": incident_data.get('vehicleRole'),
+            "vehicleCount": incident_data.get('vehicleCount'),
+            "busOrVehicle": incident_data.get('busOrVehicle')
+        }
+        
+        # Create incident
+        incident = await prisma.incident.create(data=incident_create_data)
         
         # Prepare claim data with proper relationships
         claim_create_data = {
             "status": "PENDING_INFORMATION",
             "user": {"connect": {"id": user.id}},
             "claimlist": {"connect": {"id": user.claimlistId}},
+            "incident": {"connect": {"id": incident.id}},  # Always connect the incident
             "injured": claim_data.get('injured', True),
             "healthInsurance": claim_data.get('healthInsurance'),
             "relationship": claim_data.get('relationship'),
@@ -174,10 +172,6 @@ async def create_claim(claim_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             "healthInsuranceNumber": claim_data.get('healthInsuranceNumber'),
             "isOver65": claim_data.get('isOver65')
         }
-        
-        # Connect incident if created
-        if incident_id:
-            claim_create_data["incident"] = {"connect": {"id": incident_id}}
         
         # Create claim
         claim = await prisma.claim.create(
@@ -241,7 +235,32 @@ async def get_user_claims(user_id: str, status: Optional[str] = None) -> List[Di
             order={"createdAt": "desc"}
         )
         
-        return [claim.model_dump() for claim in claims]
+        # Convert claims to dict and handle null incidents
+        result = []
+        for claim in claims:
+            claim_dict = claim.model_dump()
+            # Ensure incident is not None
+            if claim_dict["incident"] is None:
+                claim_dict["incident"] = {
+                    "id": "",
+                    "datetime": None,
+                    "location": "",
+                    "description": "",
+                    "workRelated": False,
+                    "reportCompleted": False,
+                    "policeReportCompleted": False,
+                    "supportingDocument": False,
+                    "witness": False,
+                    "priorRepresentation": False,
+                    "lostEarning": "",
+                    "reportNumber": "",
+                    "vehicleRole": None,
+                    "vehicleCount": None,
+                    "busOrVehicle": None
+                }
+            result.append(claim_dict)
+        
+        return result
         
     except Exception as e:
         logger.error(f"Error getting user claims: {str(e)}")
