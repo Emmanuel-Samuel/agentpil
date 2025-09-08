@@ -469,8 +469,8 @@ model Claim {
   clientRoleId              String?
   injuredPartyRole          Role?               @relation("InjuredPartyRole", fields: [injuredPartyRoleId], references: [id])
   injuredPartyRoleId        String?
-  incident                  Incident?           @relation(fields: [incidentId], references: [id])
-  incidentId                String?             @unique
+  incident                  Incident            @relation(fields: [incidentId], references: [id])
+  incidentId                String              @unique @default(dbgenerated("gen_random_uuid()"))
   healthInsuranceProvider   Role?               @relation("HealthInsuranceProvider", fields: [healthInsuranceProviderId], references: [id])
   healthInsuranceProviderId String?
   witness                   Witness?
