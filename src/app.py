@@ -5,7 +5,7 @@ import logging
 from contextlib import asynccontextmanager
 import time
 from typing import Any, Dict, Optional, List
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field
 from datetime import datetime
 from enum import Enum
 
@@ -21,7 +21,6 @@ from .services.database import (
     close_db
 )
 from .services.ai_agent_service import ai_agent_service
-from .services.google_maps_service import google_maps_service
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -35,7 +34,6 @@ async def lifespan(app: FastAPI):
     # Initialize database and AI service
     await initialize_db()
     await ai_agent_service.initialize()
-    await google_maps_service.initialize()
     
     logger.info("Application started - OpenAPI docs at /docs")
     
@@ -44,7 +42,6 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down...")
     await ai_agent_service.close()
-    await google_maps_service.close()
     await close_db()
     logger.info("Shutdown complete")
 
@@ -61,7 +58,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -105,18 +102,6 @@ class IncidentDetails(BaseModel):
     vehicleRole: Optional[str] = None
     vehicleCount: Optional[int] = None
     busOrVehicle: Optional[str] = None
-    transportType: Optional[str] = None
-    rideShareCompany: Optional[str] = None
-    rideShareOtherName: Optional[str] = None
-    propertyType: Optional[str] = None
-    amountLoss: Optional[str] = None
-    timeLoss: Optional[str] = None
-    priorRepresentationReason: Optional[str] = None
-    # Relationship IDs
-    policeStationId: Optional[str] = None
-    policeOfficerId: Optional[str] = None
-    lawfirmId: Optional[str] = None
-    attorneyId: Optional[str] = None
 
 class SaveClaimRequest(BaseModel):
     title: str
@@ -133,7 +118,6 @@ class SaveClaimRequest(BaseModel):
 
 class UpdateClaimRequest(BaseModel):
     """Request model for updating claim data"""
-    # Basic claim fields
     status: Optional[ClaimStatus] = None
     injured: Optional[bool] = None
     relationship: Optional[Relationship] = None
@@ -141,118 +125,28 @@ class UpdateClaimRequest(BaseModel):
     healthInsurance: Optional[bool] = None
     healthInsuranceNumber: Optional[str] = None
     isOver65: Optional[bool] = None
-    receiveMedicare: Optional[List[str]] = Field(None, alias="receiveMedicare")
+    receiveMedicare: Optional[List[str]] = None
     assignedCaseManager: Optional[str] = None
-    
-    # Additional claim fields from Prisma schema
-    title: Optional[str] = None
-    description: Optional[str] = None
-    createdAt: Optional[datetime] = None
-    updatedAt: Optional[datetime] = None
-    
-    # Relationship IDs
-    clientRoleId: Optional[str] = None
-    injuredPartyRoleId: Optional[str] = None
-    healthInsuranceProviderId: Optional[str] = None
-    userId: Optional[str] = None
-    claimlistId: Optional[str] = None
-    incidentId: Optional[str] = None
-    
-    # Nested incident update
+    # Add incident field
     incident: Optional[IncidentDetails] = None
-
-# Address verification models
-class AddressComponents(BaseModel):
-    street_number: Optional[str] = None
-    street_name: Optional[str] = None
-    city: Optional[str] = None
-    state: Optional[str] = None
-    postal_code: Optional[str] = None
-    country: Optional[str] = None
-
-class AddressVerificationRequest(BaseModel):
-    address: str = Field(..., description="The address string to verify")
-    user_id: Optional[str] = Field(None, description="User ID for audit logging")
-    address_components: Optional[AddressComponents] = None
-    include_suggestions: bool = Field(True, description="Include address suggestions")
 
 class UpdateUserRequest(BaseModel):
     """Request model for updating user profile"""
     firstName: Optional[str] = None
-    middleName: Optional[str] = None
     lastName: Optional[str] = None
-    injured: Optional[str] = None  # WereYouInjured enum as string
     email: Optional[str] = None
-    phone: Optional[str] = None
-    phoneNumber: Optional[str] = None  # Alias for phone
-    phone2: Optional[str] = None
-    gender: Optional[str] = None
+    phoneNumber: Optional[str] = None
     dateOfBirth: Optional[str] = None
-    isUnder18: Optional[bool] = None
-    # Parent info
-    fatherFirstName: Optional[str] = None
-    fatherLastName: Optional[str] = None
-    motherFirstName: Optional[str] = None
-    motherLastName: Optional[str] = None
-    # Mailing address
-    mailingAddress1: Optional[str] = None
-    mailingAddress2: Optional[str] = None
-    mailingCity: Optional[str] = None
-    mailingState: Optional[str] = None
-    mailingZipCode: Optional[str] = None
-    # Address aliases for backward compatibility
     address_street: Optional[str] = None
     address_city: Optional[str] = None
     address_state: Optional[str] = None
     address_postalCode: Optional[str] = None
-    address_country: Optional[str] = None
-    # Physical address
-    isPOBoxOrDifferentAddress: Optional[bool] = None
-    physicalAddress1: Optional[str] = None
-    physicalAddress2: Optional[str] = None
-    physicalCity: Optional[str] = None
-    physicalState: Optional[str] = None
-    physicalZipCode: Optional[str] = None
-    # Personal info
-    maritalStatus: Optional[str] = None
-    spouseFirstName: Optional[str] = None
-    spouseLastName: Optional[str] = None
-    spousePhone: Optional[str] = None
-    # Employment
-    employmentStatus: Optional[str] = None
-    employerName: Optional[str] = None
-    employerTitle: Optional[str] = None
-    employmentType: Optional[str] = None
-    pay: Optional[str] = None
-    # Education
-    schoolName: Optional[str] = None
-    expectedGraduationYear: Optional[str] = None
-    # System fields
-    role: Optional[str] = None
-    isVerified: Optional[bool] = None
-    verificationCode: Optional[str] = None
-    sourceId: Optional[str] = None
-    accountSync: Optional[str] = None
 
 class ChatMessage(BaseModel):
     message: str
     user_id: str
     claim_id: Optional[str] = None
     thread_id: Optional[str] = None
-    
-    @validator('claim_id')
-    def validate_claim_id(cls, v):
-        """Ensure claim_id is either None or a valid non-empty string"""
-        if v is not None and (not v.strip() or v.lower() == 'null'):
-            return None
-        return v
-    
-    @validator('user_id')
-    def validate_user_id(cls, v):
-        """Ensure user_id is a valid non-empty string"""
-        if not v or not v.strip():
-            raise ValueError('user_id cannot be empty')
-        return v.strip()
 
 class ChatResponse(BaseModel):
     message: str
@@ -439,7 +333,7 @@ async def get_claim_endpoint(claim_id: str = Path(...)):
         logger.error(f"Error retrieving claim: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.patch("/api/claims/{claim_id}", 
+@app.put("/api/claims/{claim_id}", 
          operation_id="update_claim_data_tool",
          tags=["claims"])
 async def update_claim_endpoint(
@@ -552,87 +446,6 @@ async def get_agents_status():
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "timestamp": time.time()}
-
-# Address verification endpoints
-@app.post("/api/address/verify", 
-          operation_id="verify_address_tool",
-          tags=["address"])
-async def verify_address_endpoint(request: AddressVerificationRequest):
-    """Verify and validate an address using Google Maps APIs"""
-    try:
-        logger.info(f"Verifying address: {request.address}")
-        
-        result = await google_maps_service.verify_address(
-            address=request.address,
-            address_components=request.address_components.model_dump() if request.address_components else None
-        )
-        
-        return {
-            "success": True,
-            "message": "Address verified successfully",
-            "data": result
-        }
-        
-    except Exception as e:
-        logger.error(f"Error verifying address: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/address/autocomplete", 
-         operation_id="address_autocomplete_tool",
-         tags=["address"])
-async def address_autocomplete_endpoint(
-    input: str,
-    country: Optional[str] = None,
-    types: Optional[str] = None
-):
-    """Get address autocomplete suggestions"""
-    try:
-        logger.info(f"Getting autocomplete for: {input}")
-        
-        result = await google_maps_service.get_address_autocomplete(
-            input_text=input,
-            country=country,
-            types=types
-        )
-        
-        return {
-            "success": True,
-            "data": result
-        }
-        
-    except Exception as e:
-        logger.error(f"Error getting autocomplete: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/address/place-details", 
-         operation_id="place_details_tool",
-         tags=["address"])
-async def place_details_endpoint(
-    place_id: str,
-    fields: Optional[str] = None
-):
-    """Get detailed information about a place"""
-    try:
-        logger.info(f"Getting place details for: {place_id}")
-        
-        result = await google_maps_service.get_place_details(
-            place_id=place_id,
-            fields=fields
-        )
-        
-        if "error" in result:
-            raise HTTPException(status_code=404, detail=result["error"])
-        
-        return {
-            "success": True,
-            "data": result
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting place details: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/", tags=["system"])
 async def root():
