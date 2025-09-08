@@ -88,7 +88,7 @@ class WitnessInfo(BaseModel):
     phone: Optional[str] = None
 
 class IncidentDetails(BaseModel):
-    datetime: Optional[datetime] = None
+    datetime: Optional[str] = None  # Accept string for datetime
     location: Optional[str] = None
     description: Optional[str] = None
     workRelated: Optional[bool] = None
@@ -99,17 +99,10 @@ class IncidentDetails(BaseModel):
     priorRepresentation: Optional[bool] = None
     lostEarning: Optional[str] = None
     reportNumber: Optional[str] = None
-    vehicleRole: Optional[str] = Field(default=None, description="Role in vehicle (driver/passenger)")
+    vehicleRole: Optional[str] = None
     vehicleCount: Optional[int] = None
-    busOrVehicle: Optional[str] = Field(default=None, description="Bus passenger or other vehicle")
+    busOrVehicle: Optional[str] = None
     
-    @field_validator('vehicleRole', mode='before')
-    @classmethod
-    def normalize_vehicle_role(cls, v):
-        if v and v.lower() == "none":
-            return None
-        return v
-
 class SaveClaimRequest(BaseModel):
     title: str
     description: str
@@ -122,13 +115,6 @@ class SaveClaimRequest(BaseModel):
     otherRelationship: Optional[str] = Field(default=None, description="Specify if relationship is 'Other'")
     healthInsuranceNumber: Optional[str] = None
     isOver65: Optional[bool] = None
-    
-    @field_validator('otherRelationship', mode='before')
-    @classmethod
-    def empty_string_to_none(cls, v):
-        if v == "":
-            return None
-        return v
 
 class UpdateClaimRequest(BaseModel):
     """Request model for updating claim data"""
