@@ -143,7 +143,8 @@ async def create_claim(claim_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
               
         # Map API fields to Prisma schema fields with default values
         incident_create_data = {
-            "datetime": incident_data.get('datetime'),
+
+            "datetime": datetime.fromisoformat(incident_data['datetime']) if incident_data.get('datetime') else None,
             "location": incident_data.get('location', ''),
             "description": incident_data.get('description', ''),
             "workRelated": incident_data.get('workRelated', False),
