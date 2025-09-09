@@ -125,6 +125,13 @@ class UpdateClaimRequest(BaseModel):
     healthInsurance: Optional[bool] = None
     healthInsuranceNumber: Optional[str] = None
     isOver65: Optional[bool] = None
+
+    policeReportCompleted: Optional[bool] = None
+    supportingDocument: Optional[bool] = None
+    workRelated: Optional[bool] = None
+    witness: Optional[bool] = None
+    priorRepresentation: Optional[bool] = None
+
     receiveMedicare: Optional[List[str]] = None
     assignedCaseManager: Optional[str] = None
     # Add incident field
@@ -358,6 +365,25 @@ async def update_claim_endpoint(
         if not updates:
             logger.warning("No valid fields to update")
             raise HTTPException(status_code=400, detail="No valid fields to update. Please provide at least one field to update.")
+        
+        # Handle direct fields from UpdateClaimRequest that should be moved to incident
+        incident_fields = ['policeReportCompleted', 'supportingDocument', 'workRelated', 'witness', 'priorRepresentation']
+        incident_updates = {}
+        
+        # If incident is already in updates, use that as a base
+        if 'incident' in updates and isinstance(updates['incident'], dict):
+            incident_updates = updates['incident']
+        
+        # Move direct incident fields to incident object
+        for field in incident_fields:
+            if field in updates:
+                incident_updates[field] = updates.pop(field)
+        
+        # Only add incident to updates if we have incident updates
+        if incident_updates:
+            updates['incident'] = incident_updates
+            
+        logger.info(f"Final updates structure: {updates}")
         
         result = await update_claim(claim_id, updates)
         
