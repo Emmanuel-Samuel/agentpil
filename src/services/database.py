@@ -242,6 +242,7 @@ async def get_user_claims(user_id: str, status: Optional[str] = None) -> List[Di
         if status:
             where_clause["status"] = status.upper()
         
+        logger.info(f"Searching claims with where_clause: {where_clause}")
         claims = await prisma.claim.find_many(
             where=where_clause,
             include={
@@ -256,8 +257,8 @@ async def get_user_claims(user_id: str, status: Optional[str] = None) -> List[Di
         result = []
         for claim in claims:
             claim_dict = claim.model_dump()
-            # Ensure incident is not None
-            if claim_dict["incident"] is None:
+            # Ensure incident is not None and handle potential null incidentId
+            if claim_dict["incident"] is None or claim_dict["incident"]["id"] is None:
                 claim_dict["incident"] = {
                     "id": "",
                     "datetime": None,
