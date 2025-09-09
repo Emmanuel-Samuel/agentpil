@@ -293,7 +293,9 @@ async def update_claim(claim_id: str, updates: Dict[str, Any]) -> Optional[Dict[
         valid_fields = {
             'status', 'injured', 'relationship', 'otherRelationship', 
             'healthInsurance', 'healthInsuranceNumber', 'isOver65', 
-            'receiveMedicare', 'assignedCaseManager'
+            'receiveMedicare', 'assignedCaseManager',
+            'policeReportCompleted', 'supportingDocument', 'workRelated',
+            'witness', 'priorRepresentation'
         }
         
         # Filter updates to only include valid schema fields
@@ -306,7 +308,7 @@ async def update_claim(claim_id: str, updates: Dict[str, Any]) -> Optional[Dict[
             
             # Map API fields to Prisma schema fields
             incident_updates = {
-                "datetime": incident_data.get('datetime'),
+                "datetime": datetime.fromisoformat(incident_data['datetime']) if incident_data.get('datetime') else None,
                 "location": incident_data.get('location'),
                 "description": incident_data.get('description'),
                 "workRelated": incident_data.get('workRelated'),
@@ -325,32 +327,40 @@ async def update_claim(claim_id: str, updates: Dict[str, Any]) -> Optional[Dict[
             # Remove None values
             incident_updates = {k: v for k, v in incident_updates.items() if v is not None}
         
+        # Log the updates for debugging
+        logger.info(f"Claim updates: {claim_updates}")
+        logger.info(f"Incident updates: {incident_updates}")
+        
         if not claim_updates and not incident_updates:
             logger.warning(f"No valid fields to update for claim {claim_id}")
             return None
         
-        # First update incident if needed
-        if incident_updates:
-            # Check if claim has an incident
-            claim = await prisma.claim.find_unique(
-                where={"id": claim_id},
-                include={"incident": True}
-            )
+        # First check if claim exists
+        claim = await prisma.claim.find_unique(
+            where={"id": claim_id},
+            include={"incident": True}
+        )
+        
+        if not claim:
+            logger.warning(f"Claim {claim_id} not found")
+            return None
             
-            if claim and claim.incident:
+        # Update incident if needed
+        if incident_updates:
+            if claim.incident:
                 # Update existing incident
                 await prisma.incident.update(
                     where={"id": claim.incident.id},
                     data=incident_updates
                 )
-            elif claim:
+            else:
                 # Create new incident and connect to claim
                 incident = await prisma.incident.create(data=incident_updates)
                 claim_updates["incident"] = {"connect": {"id": incident.id}}
         
         # Then update claim if needed
         if claim_updates:
-            claim = await prisma.claim.update(
+            updated_claim = await prisma.claim.update(
                 where={"id": claim_id},
                 data=claim_updates,
                 include={
@@ -359,10 +369,10 @@ async def update_claim(claim_id: str, updates: Dict[str, Any]) -> Optional[Dict[
                     "claimlist": True
                 }
             )
-            return claim.model_dump() if claim else None
+            return updated_claim.model_dump() if updated_claim else None
         else:
             # If only incident was updated, return the updated claim
-            claim = await prisma.claim.find_unique(
+            updated_claim = await prisma.claim.find_unique(
                 where={"id": claim_id},
                 include={
                     "user": True,
@@ -370,7 +380,7 @@ async def update_claim(claim_id: str, updates: Dict[str, Any]) -> Optional[Dict[
                     "claimlist": True
                 }
             )
-            return claim.model_dump() if claim else None
+            return updated_claim.model_dump() if updated_claim else None
         
     except Exception as e:
         logger.error(f"Error updating claim {claim_id}: {str(e)}")
