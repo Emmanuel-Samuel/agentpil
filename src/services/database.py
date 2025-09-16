@@ -307,22 +307,35 @@ async def update_claim(claim_id: str, updates: Dict[str, Any]) -> Optional[Dict[
             incident_data = updates['incident']
             
             # Map API fields to Prisma schema fields
-            incident_updates = {
-                "datetime": datetime.fromisoformat(incident_data['datetime']) if incident_data.get('datetime') else None,
-                "location": incident_data.get('location'),
-                "description": incident_data.get('description'),
-                "workRelated": incident_data.get('workRelated'),
-                "reportCompleted": incident_data.get('reportCompleted'),
-                "policeReportCompleted": incident_data.get('policeReportCompleted'),
-                "supportingDocument": incident_data.get('supportingDocument'),
-                "witness": incident_data.get('witness'),
-                "priorRepresentation": incident_data.get('priorRepresentation'),
-                "lostEarning": incident_data.get('lostEarning'),
-                "reportNumber": incident_data.get('reportNumber'),
-                "vehicleRole": incident_data.get('vehicleRole'),
-                "vehicleCount": incident_data.get('vehicleCount'),
-                "busOrVehicle": incident_data.get('busOrVehicle')
-            }
+            incident_updates = {}
+            if incident_data.get('datetime'):
+                incident_updates["datetime"] = datetime.fromisoformat(incident_data['datetime'])
+            if incident_data.get('location') is not None:
+                incident_updates["location"] = incident_data.get('location')
+            if incident_data.get('description') is not None:
+                incident_updates["description"] = incident_data.get('description')
+            if incident_data.get('workRelated') is not None:
+                incident_updates["workRelated"] = incident_data.get('workRelated')
+            if incident_data.get('reportCompleted') is not None:
+                incident_updates["reportCompleted"] = incident_data.get('reportCompleted')
+            if incident_data.get('policeReportCompleted') is not None:
+                incident_updates["policeReportCompleted"] = incident_data.get('policeReportCompleted')
+            if incident_data.get('supportingDocument') is not None:
+                incident_updates["supportingDocument"] = incident_data.get('supportingDocument')
+            if incident_data.get('witness') is not None:
+                incident_updates["witness"] = incident_data.get('witness')
+            if incident_data.get('priorRepresentation') is not None:
+                incident_updates["priorRepresentation"] = incident_data.get('priorRepresentation')
+            if incident_data.get('lostEarning') is not None:
+                incident_updates["lostEarning"] = incident_data.get('lostEarning')
+            if incident_data.get('reportNumber') is not None:
+                incident_updates["reportNumber"] = incident_data.get('reportNumber')
+            if incident_data.get('vehicleRole') is not None:
+                incident_updates["vehicleRole"] = incident_data.get('vehicleRole')
+            if incident_data.get('vehicleCount') is not None:
+                incident_updates["vehicleCount"] = incident_data.get('vehicleCount')
+            if incident_data.get('busOrVehicle') is not None:
+                incident_updates["busOrVehicle"] = incident_data.get('busOrVehicle')
             
             # Remove None values
             incident_updates = {k: v for k, v in incident_updates.items() if v is not None}
